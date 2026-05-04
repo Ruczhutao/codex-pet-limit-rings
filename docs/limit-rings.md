@@ -2,18 +2,51 @@
 
 Codex Pet Limit Rings is a native macOS companion app for Codex pets. It does not patch Codex, replace pet art, or modify the Codex app bundle. It follows the current pet with a transparent always-on-top window and exposes its own menu-bar icon.
 
-The rings are pet-agnostic. They work with any pet Codex displays because the app tracks the pet window bounds rather than reading, editing, or understanding the pet artwork.
+The overlay is pet-agnostic. It works with any pet Codex displays because the app tracks the pet window bounds rather than reading, editing, or understanding the pet artwork.
+
+## Display Modes
+
+Three mutually exclusive display modes are available via **Settings** (⌘,):
+
+- **Rings** — Two concentric rings around the pet. Outer ring = short-window limit. Inner ring = weekly limit. Colors shift from green/blue (healthy) through amber to red (critical).
+- **Bars** — Horizontal progress bars directly beneath the pet, showing the same two limits with percentage labels.
+- **Minimal** — Compact numeric readout (`72%  45%`) floating at the top-right corner of the pet.
+
+## Settings Panel
+
+Open from the menu bar icon: **Settings…** (⌘,)
+
+| Setting | Options | Default |
+|---------|---------|---------|
+| **Color Scheme** | Warm / Cool / Cyberpunk / Original | Warm |
+| **Tracking Speed** | Fast (~30fps) / Medium (~12fps) / Smooth (~8fps) | Fast |
+| **Display Mode** | Rings / Bars / Minimal | Rings |
+| **Data Source** | Both / Short Window / Weekly | Both |
+| **Readout Mode** | Always / Hover | Always |
+| **Language** | 中文 / English | 中文 |
+
+### Readout Mode
+
+- **Always** — Numerical values are always visible (ring labels, bar percentages, minimal numbers).
+- **Hover** — Values appear only when the cursor is over the pet or the overlay. Rings show arc-endpoint labels; bars show percentages; minimal mode is not affected (it is inherently minimal).
+
+### Data Source
+
+- **Both** — Shows both short-window and weekly limits.
+- **Short Window** — Shows only the short-window limit.
+- **Weekly** — Shows only the weekly limit.
+
+When a single source is selected, the bar height and minimal width auto-shrink to fit one item.
 
 ## Experience Contract
 
 - A rings icon appears in the macOS menu bar.
 - `Show Rings` toggles the overlay without quitting the app.
 - `Refresh Now` rereads usage and pet-position state.
-- Hovering over the ring or pet shows exact remaining percentages at the arc endpoints.
-- Dragging the pet makes the rings follow the gesture immediately while Codex persists the new position.
-- Closing the Codex pet hides the rings.
+- Closing the Codex pet hides the overlay.
 - Multi-display positioning uses the screen containing the pet bounds, not the currently focused screen.
 - Switching to another Codex pet requires no extra setup; the overlay follows the active pet.
+- Dragging the pet makes the overlay follow the gesture immediately while Codex persists the new position.
 
 ## Data Flow
 
@@ -29,11 +62,9 @@ No OpenAI API key is required. The menu summary says `Live` when the direct usag
 
 ## Rendering Model
 
-- Outer ring: short-window remaining percentage.
-- Inner ring: weekly remaining percentage.
-- Ring colors are derived from remaining capacity: green/blue for healthy, amber for low, red for critical.
-- Exact percentages are shown only on hover to keep the pet feeling ambient rather than dashboard-like.
-- Additional model-limit buckets may appear as small outer markers when available.
+- Colors are derived from remaining capacity and the selected color scheme.
+- Exact percentages respect the **Readout Mode** setting (always-on or hover-only).
+- Additional model-limit buckets may appear as small outer markers in rings mode when available.
 
 ## Install Contract
 
@@ -56,7 +87,7 @@ The LaunchAgent starts the app at login. The installer also removes the earlier 
 ~/Library/LaunchAgents/com.codex-pet.limit-aura.plist
 ```
 
-`tools/uninstall-limit-rings.sh` unloads the LaunchAgent, removes the app bundle, clears the saved ring visibility preference, and also cleans up those earlier prototype names.
+`tools/uninstall-limit-rings.sh` unloads the LaunchAgent, removes the app bundle, clears saved preferences, and also cleans up those earlier prototype names.
 
 ## Development
 

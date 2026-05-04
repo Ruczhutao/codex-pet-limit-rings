@@ -2,6 +2,160 @@ import AppKit
 import Foundation
 import SQLite3
 
+enum ColorScheme: String, CaseIterable {
+    case warm
+    case cool
+    case cyberpunk
+    case original
+}
+
+enum TrackingSpeed: String, CaseIterable {
+    case fast
+    case medium
+    case smooth
+
+    var interval: TimeInterval {
+        switch self {
+        case .fast: return 0.03
+        case .medium: return 0.08
+        case .smooth: return 0.12
+        }
+    }
+}
+
+enum AppLanguage: String, CaseIterable {
+    case zh
+    case en
+}
+
+enum DisplayMode: String, CaseIterable {
+    case rings
+    case bars
+    case minimal
+}
+
+enum DataSource: String, CaseIterable {
+    case both
+    case primary
+    case secondary
+}
+
+enum ReadoutMode: String, CaseIterable {
+    case always
+    case hover
+}
+
+struct LimitRingsSettings {
+    var colorScheme: ColorScheme
+    var trackingSpeed: TrackingSpeed
+    var displayMode: DisplayMode
+    var dataSource: DataSource
+    var readoutMode: ReadoutMode
+    var barOffsetX: CGFloat
+    var barOffsetY: CGFloat
+    var barThickness: CGFloat
+    var language: AppLanguage
+
+    private static let kColorScheme = "CodexPetLimitRings.colorScheme"
+    private static let kTrackingSpeed = "CodexPetLimitRings.trackingSpeed"
+    private static let kDisplayMode = "CodexPetLimitRings.displayMode"
+    private static let kDataSource = "CodexPetLimitRings.dataSource"
+    private static let kReadoutMode = "CodexPetLimitRings.readoutMode"
+    private static let kBarOffsetX = "CodexPetLimitRings.barOffsetX"
+    private static let kBarOffsetY = "CodexPetLimitRings.barOffsetY"
+    private static let kBarThickness = "CodexPetLimitRings.barThickness"
+    private static let kLanguage = "CodexPetLimitRings.language"
+
+    static func load() -> LimitRingsSettings {
+        let d = UserDefaults.standard
+        let mode: DisplayMode
+        if let saved = d.string(forKey: kDisplayMode), let parsed = DisplayMode(rawValue: saved) {
+            mode = parsed
+        } else if d.object(forKey: "CodexPetLimitRings.showBars") as? Bool == true {
+            mode = .bars
+        } else {
+            mode = .rings
+        }
+        return LimitRingsSettings(
+            colorScheme: ColorScheme(rawValue: d.string(forKey: kColorScheme) ?? "") ?? .warm,
+            trackingSpeed: TrackingSpeed(rawValue: d.string(forKey: kTrackingSpeed) ?? "") ?? .fast,
+            displayMode: mode,
+            dataSource: DataSource(rawValue: d.string(forKey: kDataSource) ?? "") ?? .both,
+            readoutMode: ReadoutMode(rawValue: d.string(forKey: kReadoutMode) ?? "") ?? .always,
+            barOffsetX: d.object(forKey: kBarOffsetX) != nil ? CGFloat(d.double(forKey: kBarOffsetX)) : 0,
+            barOffsetY: d.object(forKey: kBarOffsetY) != nil ? CGFloat(d.double(forKey: kBarOffsetY)) : 0,
+            barThickness: d.object(forKey: kBarThickness) != nil ? CGFloat(d.double(forKey: kBarThickness)) : 4.5,
+            language: AppLanguage(rawValue: d.string(forKey: kLanguage) ?? "") ?? .zh
+        )
+    }
+
+    func save() {
+        let d = UserDefaults.standard
+        d.set(colorScheme.rawValue, forKey: Self.kColorScheme)
+        d.set(trackingSpeed.rawValue, forKey: Self.kTrackingSpeed)
+        d.set(displayMode.rawValue, forKey: Self.kDisplayMode)
+        d.set(dataSource.rawValue, forKey: Self.kDataSource)
+        d.set(readoutMode.rawValue, forKey: Self.kReadoutMode)
+        d.set(Double(barOffsetX), forKey: Self.kBarOffsetX)
+        d.set(Double(barOffsetY), forKey: Self.kBarOffsetY)
+        d.set(Double(barThickness), forKey: Self.kBarThickness)
+        d.set(language.rawValue, forKey: Self.kLanguage)
+    }
+}
+
+struct L10n {
+    static func text(_ zh: String, _ en: String, lang: AppLanguage) -> String {
+        lang == .zh ? zh : en
+    }
+
+    static func colorSchemeName(_ scheme: ColorScheme, lang: AppLanguage) -> String {
+        switch scheme {
+        case .warm: return lang == .zh ? "暖色调" : "Warm"
+        case .cool: return lang == .zh ? "冷色调" : "Cool"
+        case .cyberpunk: return lang == .zh ? "赛博朋克" : "Cyberpunk"
+        case .original: return lang == .zh ? "经典" : "Original"
+        }
+    }
+
+    static func speedName(_ speed: TrackingSpeed, lang: AppLanguage) -> String {
+        switch speed {
+        case .fast: return lang == .zh ? "快速" : "Fast"
+        case .medium: return lang == .zh ? "适中" : "Medium"
+        case .smooth: return lang == .zh ? "平滑" : "Smooth"
+        }
+    }
+
+    static func languageName(_ language: AppLanguage, lang: AppLanguage) -> String {
+        switch language {
+        case .zh: return lang == .zh ? "中文" : "Chinese"
+        case .en: return "English"
+        }
+    }
+
+    static func displayModeName(_ mode: DisplayMode, lang: AppLanguage) -> String {
+        switch mode {
+        case .rings: return lang == .zh ? "圆环" : "Rings"
+        case .bars: return lang == .zh ? "条状" : "Bars"
+        case .minimal: return lang == .zh ? "极简" : "Minimal"
+        }
+    }
+
+    static func dataSourceName(_ source: DataSource, lang: AppLanguage) -> String {
+        switch source {
+        case .both: return lang == .zh ? "两者" : "Both"
+        case .primary: return lang == .zh ? "短窗口" : "Short"
+        case .secondary: return lang == .zh ? "周限额" : "Weekly"
+        }
+    }
+
+    static func readoutModeName(_ mode: ReadoutMode, lang: AppLanguage) -> String {
+        switch mode {
+        case .always: return lang == .zh ? "始终显示" : "Always"
+        case .hover: return lang == .zh ? "悬停显示" : "Hover"
+        }
+    }
+}
+
 struct LimitBucket {
     var usedPercent: Double
     var windowMinutes: Double?
@@ -21,10 +175,17 @@ struct LimitState {
     var source: String
 
     static let empty = LimitState(planType: nil, primary: nil, secondary: nil, additional: [], observedAt: Date(), source: "none")
+
+    func filtered(for source: DataSource) -> LimitState {
+        switch source {
+        case .both: return self
+        case .primary: return LimitState(planType: planType, primary: primary, secondary: nil, additional: [], observedAt: observedAt, source: self.source)
+        case .secondary: return LimitState(planType: planType, primary: nil, secondary: secondary, additional: [], observedAt: observedAt, source: self.source)
+        }
+    }
 }
 
 private let limitStatePollInterval: TimeInterval = 20.0
-private let petFramePollInterval: TimeInterval = 0.12
 private let ringsVisibleDefaultsKey = "CodexPetLimitRings.ringsVisible"
 private let liveUsageURL = URL(string: "https://chatgpt.com/backend-api/wham/usage")!
 
@@ -299,6 +460,7 @@ struct LimitRingRenderer {
     var state: LimitState
     var phase: Double
     var showsReadout: Bool = false
+    var colorScheme: ColorScheme = .warm
 
     func draw(in rect: CGRect) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
@@ -372,7 +534,8 @@ struct LimitRingRenderer {
 
     private func drawHalo(_ context: CGContext, center: CGPoint, radius: CGFloat, urgency: CGFloat, breathe: CGFloat) {
         context.saveGState()
-        let color = NSColor(calibratedRed: 0.23 + urgency * 0.55, green: 0.85 - urgency * 0.30, blue: 0.78 - urgency * 0.48, alpha: 0.22 + urgency * 0.16)
+        let halo = haloColors(urgency: urgency)
+        let color = NSColor(calibratedRed: halo.r, green: halo.g, blue: halo.b, alpha: 0.22 + urgency * 0.16)
         context.setLineCap(.round)
         context.setShadow(offset: .zero, blur: 14.0 + urgency * breathe * 5.0, color: color.withAlphaComponent(0.55).cgColor)
         context.setStrokeColor(color.withAlphaComponent(0.20).cgColor)
@@ -616,15 +779,44 @@ struct LimitRingRenderer {
 
     private func color(forRemaining remaining: Double, role: RingRole) -> NSColor {
         if remaining <= 12 {
-            return NSColor(calibratedRed: 1.00, green: 0.26, blue: 0.22, alpha: 0.96)
+            switch colorScheme {
+            case .warm: return NSColor(calibratedRed: 0.94, green: 0.22, blue: 0.18, alpha: 0.96)
+            case .cool: return NSColor(calibratedRed: 0.88, green: 0.22, blue: 0.38, alpha: 0.96)
+            case .cyberpunk: return NSColor(calibratedRed: 1.00, green: 0.12, blue: 0.42, alpha: 0.96)
+            case .original: return NSColor(calibratedRed: 1.00, green: 0.26, blue: 0.22, alpha: 0.96)
+            }
         }
         if remaining <= 30 {
-            return NSColor(calibratedRed: 1.00, green: 0.68, blue: 0.20, alpha: 0.96)
+            switch colorScheme {
+            case .warm: return NSColor(calibratedRed: 0.96, green: 0.52, blue: 0.15, alpha: 0.96)
+            case .cool: return NSColor(calibratedRed: 0.68, green: 0.42, blue: 0.90, alpha: 0.96)
+            case .cyberpunk: return NSColor(calibratedRed: 0.98, green: 0.80, blue: 0.12, alpha: 0.96)
+            case .original: return NSColor(calibratedRed: 1.00, green: 0.68, blue: 0.20, alpha: 0.96)
+            }
         }
         if role == .secondary {
-            return NSColor(calibratedRed: 0.36, green: 0.70, blue: 1.00, alpha: 0.90)
+            switch colorScheme {
+            case .warm: return NSColor(calibratedRed: 0.95, green: 0.78, blue: 0.28, alpha: 0.90)
+            case .cool: return NSColor(calibratedRed: 0.58, green: 0.45, blue: 0.92, alpha: 0.90)
+            case .cyberpunk: return NSColor(calibratedRed: 0.95, green: 0.30, blue: 0.72, alpha: 0.90)
+            case .original: return NSColor(calibratedRed: 0.36, green: 0.70, blue: 1.00, alpha: 0.90)
+            }
         }
-        return NSColor(calibratedRed: 0.24, green: 0.92, blue: 0.74, alpha: 0.96)
+        switch colorScheme {
+        case .warm: return NSColor(calibratedRed: 1.00, green: 0.62, blue: 0.16, alpha: 0.96)
+        case .cool: return NSColor(calibratedRed: 0.42, green: 0.55, blue: 1.00, alpha: 0.96)
+        case .cyberpunk: return NSColor(calibratedRed: 0.08, green: 0.96, blue: 0.85, alpha: 0.96)
+        case .original: return NSColor(calibratedRed: 0.24, green: 0.92, blue: 0.74, alpha: 0.96)
+        }
+    }
+
+    private func haloColors(urgency: CGFloat) -> (r: CGFloat, g: CGFloat, b: CGFloat) {
+        switch colorScheme {
+        case .warm: return (0.85 + urgency * 0.12, 0.60 - urgency * 0.25, 0.18 - urgency * 0.08)
+        case .cool: return (0.35 + urgency * 0.35, 0.45 - urgency * 0.10, 0.90 - urgency * 0.30)
+        case .cyberpunk: return (0.20 + urgency * 0.55, 0.90 - urgency * 0.50, 0.80 - urgency * 0.35)
+        case .original: return (0.23 + urgency * 0.55, 0.85 - urgency * 0.30, 0.78 - urgency * 0.48)
+        }
     }
 
     private func point(center: CGPoint, radius: CGFloat, angle: CGFloat) -> CGPoint {
@@ -649,11 +841,540 @@ final class LimitRingView: NSView {
     var showsReadout: Bool = false {
         didSet { needsDisplay = true }
     }
+    var colorScheme: ColorScheme = .warm {
+        didSet { needsDisplay = true }
+    }
 
     override var isOpaque: Bool { false }
 
     override func draw(_ dirtyRect: NSRect) {
-        LimitRingRenderer(state: state, phase: phase, showsReadout: showsReadout).draw(in: bounds)
+        LimitRingRenderer(state: state, phase: phase, showsReadout: showsReadout, colorScheme: colorScheme).draw(in: bounds)
+    }
+}
+
+struct LimitBarRenderer {
+    var state: LimitState
+    var colorScheme: ColorScheme = .warm
+    var showsValues: Bool = true
+    var barThickness: CGFloat = 4.5
+
+    func draw(in rect: CGRect) {
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+        context.saveGState()
+        context.setShouldAntialias(true)
+        context.clear(rect)
+
+        let barHeight: CGFloat = barThickness
+        let spacing: CGFloat = 3.0
+        let textGap: CGFloat = 6.0
+        let barWidth = rect.width
+
+        let textAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedSystemFont(ofSize: 9.5, weight: .medium),
+            .foregroundColor: NSColor(calibratedWhite: 1.0, alpha: 0.82)
+        ]
+
+        var cursorY = rect.height
+
+        if let primary = state.primary {
+            if showsValues {
+                let text = formatPercent(primary.remainingPercent)
+                let textSize = (text as NSString).size(withAttributes: textAttrs)
+                let textY = cursorY - textGap - textSize.height
+                (text as NSString).draw(at: CGPoint(x: 0, y: textY), withAttributes: textAttrs)
+                cursorY = textY - spacing
+            }
+            let color = barColor(forRemaining: primary.remainingPercent, role: .primary)
+            let barY = cursorY - barHeight
+            drawBar(context, rect: CGRect(x: 0, y: barY, width: barWidth, height: barHeight), remaining: primary.remainingPercent, color: color)
+            cursorY = barY - spacing
+        }
+
+        if let secondary = state.secondary {
+            if showsValues {
+                let text = formatPercent(secondary.remainingPercent)
+                let textSize = (text as NSString).size(withAttributes: textAttrs)
+                let textY = cursorY - textGap - textSize.height
+                (text as NSString).draw(at: CGPoint(x: 0, y: textY), withAttributes: textAttrs)
+                cursorY = textY - spacing
+            }
+            let color = barColor(forRemaining: secondary.remainingPercent, role: .secondary)
+            let barY = cursorY - barHeight
+            drawBar(context, rect: CGRect(x: 0, y: barY, width: barWidth, height: barHeight), remaining: secondary.remainingPercent, color: color)
+        }
+
+        context.restoreGState()
+    }
+
+    private enum BarRole { case primary, secondary }
+
+    private func drawBar(_ context: CGContext, rect: CGRect, remaining: Double, color: NSColor) {
+        let cornerRadius = rect.height / 2.0
+        let trackPath = CGPath(roundedRect: rect, cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil)
+        context.setFillColor(NSColor(calibratedWhite: 1.0, alpha: 0.07).cgColor)
+        context.addPath(trackPath)
+        context.fillPath()
+
+        let fillWidth = max(rect.width * CGFloat(max(remaining, 0.0) / 100.0), rect.height)
+        let fillRect = CGRect(x: rect.minX, y: rect.minY, width: fillWidth, height: rect.height)
+        let fillPath = CGPath(roundedRect: fillRect, cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil)
+        context.setShadow(offset: .zero, blur: 5.0, color: color.withAlphaComponent(0.30).cgColor)
+        context.setFillColor(color.cgColor)
+        context.addPath(fillPath)
+        context.fillPath()
+    }
+
+    private func barColor(forRemaining remaining: Double, role: BarRole) -> NSColor {
+        if remaining <= 12 {
+            switch colorScheme {
+            case .warm: return NSColor(calibratedRed: 0.94, green: 0.22, blue: 0.18, alpha: 0.96)
+            case .cool: return NSColor(calibratedRed: 0.88, green: 0.22, blue: 0.38, alpha: 0.96)
+            case .cyberpunk: return NSColor(calibratedRed: 1.00, green: 0.12, blue: 0.42, alpha: 0.96)
+            case .original: return NSColor(calibratedRed: 1.00, green: 0.26, blue: 0.22, alpha: 0.96)
+            }
+        }
+        if remaining <= 30 {
+            switch colorScheme {
+            case .warm: return NSColor(calibratedRed: 0.96, green: 0.52, blue: 0.15, alpha: 0.96)
+            case .cool: return NSColor(calibratedRed: 0.68, green: 0.42, blue: 0.90, alpha: 0.96)
+            case .cyberpunk: return NSColor(calibratedRed: 0.98, green: 0.80, blue: 0.12, alpha: 0.96)
+            case .original: return NSColor(calibratedRed: 1.00, green: 0.68, blue: 0.20, alpha: 0.96)
+            }
+        }
+        if role == .secondary {
+            switch colorScheme {
+            case .warm: return NSColor(calibratedRed: 0.95, green: 0.78, blue: 0.28, alpha: 0.90)
+            case .cool: return NSColor(calibratedRed: 0.58, green: 0.45, blue: 0.92, alpha: 0.90)
+            case .cyberpunk: return NSColor(calibratedRed: 0.95, green: 0.30, blue: 0.72, alpha: 0.90)
+            case .original: return NSColor(calibratedRed: 0.36, green: 0.70, blue: 1.00, alpha: 0.90)
+            }
+        }
+        switch colorScheme {
+        case .warm: return NSColor(calibratedRed: 1.00, green: 0.62, blue: 0.16, alpha: 0.96)
+        case .cool: return NSColor(calibratedRed: 0.42, green: 0.55, blue: 1.00, alpha: 0.96)
+        case .cyberpunk: return NSColor(calibratedRed: 0.08, green: 0.96, blue: 0.85, alpha: 0.96)
+        case .original: return NSColor(calibratedRed: 0.24, green: 0.92, blue: 0.74, alpha: 0.96)
+        }
+    }
+
+    private func formatPercent(_ percent: Double) -> String {
+        if abs(percent.rounded() - percent) < 0.05 {
+            return "\(Int(percent.rounded()))%"
+        }
+        return String(format: "%.1f%%", percent)
+    }
+}
+
+final class LimitBarView: NSView {
+    var state: LimitState = .empty {
+        didSet { needsDisplay = true }
+    }
+    var colorScheme: ColorScheme = .warm {
+        didSet { needsDisplay = true }
+    }
+    var showsValues: Bool = true {
+        didSet { needsDisplay = true }
+    }
+
+    override var isOpaque: Bool { false }
+
+    var barThickness: CGFloat = 4.5 {
+        didSet { needsDisplay = true }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        LimitBarRenderer(state: state, colorScheme: colorScheme, showsValues: showsValues, barThickness: barThickness).draw(in: bounds)
+    }
+}
+
+struct MinimalRenderer {
+    var state: LimitState
+    var colorScheme: ColorScheme = .warm
+
+    func draw(in rect: CGRect) {
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+        context.saveGState()
+        context.setShouldAntialias(true)
+        context.clear(rect)
+
+        let combined = NSMutableAttributedString()
+        let sepAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
+            .foregroundColor: NSColor(calibratedWhite: 1.0, alpha: 0.25)
+        ]
+
+        if let primary = state.primary {
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .bold),
+                .foregroundColor: color(forRemaining: primary.remainingPercent)
+            ]
+            combined.append(NSAttributedString(string: formatPercent(primary.remainingPercent), attributes: attrs))
+        }
+        if state.primary != nil && state.secondary != nil {
+            combined.append(NSAttributedString(string: "  ", attributes: sepAttrs))
+        }
+        if let secondary = state.secondary {
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .bold),
+                .foregroundColor: color(forRemaining: secondary.remainingPercent)
+            ]
+            combined.append(NSAttributedString(string: formatPercent(secondary.remainingPercent), attributes: attrs))
+        }
+
+        let textSize = combined.size()
+        let bgPadding: CGFloat = 4.0
+        let bgRect = CGRect(
+            x: 0,
+            y: (rect.height - textSize.height) / 2.0 - 1,
+            width: textSize.width + bgPadding * 2,
+            height: textSize.height + bgPadding
+        )
+
+        let bgPath = CGPath(roundedRect: bgRect, cornerWidth: 5.0, cornerHeight: 5.0, transform: nil)
+        context.setFillColor(NSColor(calibratedWhite: 0.04, alpha: 0.72).cgColor)
+        context.addPath(bgPath)
+        context.fillPath()
+
+        combined.draw(at: CGPoint(x: bgPadding, y: bgRect.minY + bgPadding / 2))
+
+        context.restoreGState()
+    }
+
+    private func color(forRemaining remaining: Double) -> NSColor {
+        if remaining <= 12 {
+            switch colorScheme {
+            case .warm: return NSColor(calibratedRed: 0.94, green: 0.22, blue: 0.18, alpha: 0.96)
+            case .cool: return NSColor(calibratedRed: 0.88, green: 0.22, blue: 0.38, alpha: 0.96)
+            case .cyberpunk: return NSColor(calibratedRed: 1.00, green: 0.12, blue: 0.42, alpha: 0.96)
+            case .original: return NSColor(calibratedRed: 1.00, green: 0.26, blue: 0.22, alpha: 0.96)
+            }
+        }
+        if remaining <= 30 {
+            switch colorScheme {
+            case .warm: return NSColor(calibratedRed: 0.96, green: 0.52, blue: 0.15, alpha: 0.96)
+            case .cool: return NSColor(calibratedRed: 0.68, green: 0.42, blue: 0.90, alpha: 0.96)
+            case .cyberpunk: return NSColor(calibratedRed: 0.98, green: 0.80, blue: 0.12, alpha: 0.96)
+            case .original: return NSColor(calibratedRed: 1.00, green: 0.68, blue: 0.20, alpha: 0.96)
+            }
+        }
+        switch colorScheme {
+        case .warm: return NSColor(calibratedRed: 1.00, green: 0.62, blue: 0.16, alpha: 0.96)
+        case .cool: return NSColor(calibratedRed: 0.42, green: 0.55, blue: 1.00, alpha: 0.96)
+        case .cyberpunk: return NSColor(calibratedRed: 0.08, green: 0.96, blue: 0.85, alpha: 0.96)
+        case .original: return NSColor(calibratedRed: 0.24, green: 0.92, blue: 0.74, alpha: 0.96)
+        }
+    }
+
+    private func formatPercent(_ percent: Double) -> String {
+        if abs(percent.rounded() - percent) < 0.05 {
+            return "\(Int(percent.rounded()))%"
+        }
+        return String(format: "%.1f%%", percent)
+    }
+}
+
+final class MinimalView: NSView {
+    var state: LimitState = .empty {
+        didSet { needsDisplay = true }
+    }
+    var colorScheme: ColorScheme = .warm {
+        didSet { needsDisplay = true }
+    }
+
+    override var isOpaque: Bool { false }
+
+    override func draw(_ dirtyRect: NSRect) {
+        if state.primary != nil || state.secondary != nil {
+            MinimalRenderer(state: state, colorScheme: colorScheme).draw(in: bounds)
+        }
+    }
+}
+
+final class SettingsPanelController: NSObject {
+    private let window: NSWindow
+    private var settings: LimitRingsSettings
+    private let onApply: (LimitRingsSettings) -> Void
+
+    private var colorPopup: NSPopUpButton!
+    private var speedPopup: NSPopUpButton!
+    private var displayPopup: NSPopUpButton!
+    private var dataPopup: NSPopUpButton!
+    private var readoutPopup: NSPopUpButton!
+    private var langPopup: NSPopUpButton!
+    private var offsetXField: NSTextField!
+    private var offsetYField: NSTextField!
+    private var thicknessField: NSTextField!
+    private var colorLabel: NSTextField!
+    private var speedLabel: NSTextField!
+    private var displayLabel: NSTextField!
+    private var dataLabel: NSTextField!
+    private var readoutLabel: NSTextField!
+    private var offsetXLabel: NSTextField!
+    private var offsetYLabel: NSTextField!
+    private var thicknessLabel: NSTextField!
+    private var langLabel: NSTextField!
+
+    init(settings: LimitRingsSettings, onApply: @escaping (LimitRingsSettings) -> Void) {
+        self.settings = settings
+        self.onApply = onApply
+
+        window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 420),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = L10n.text("设置", "Settings", lang: settings.language)
+        window.isReleasedWhenClosed = false
+        super.init()
+
+        buildUI()
+        localizeLabels()
+    }
+
+    func show() {
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func buildUI() {
+        let contentView = NSView(frame: window.contentRect(forFrameRect: window.frame))
+        window.contentView = contentView
+
+        let margin: CGFloat = 24
+        let rowH: CGFloat = 26
+        let gap: CGFloat = 10
+        let labelW: CGFloat = 90
+        let popupW: CGFloat = 150
+        let topY: CGFloat = 370
+
+        func rowOffset(_ index: Int) -> CGFloat {
+            topY - CGFloat(index) * (rowH + gap)
+        }
+
+        colorLabel = makeLabel(frame: NSRect(x: margin, y: rowOffset(0), width: labelW, height: rowH))
+        contentView.addSubview(colorLabel)
+        colorPopup = NSPopUpButton(frame: NSRect(x: margin + labelW + 8, y: rowOffset(0), width: popupW, height: rowH))
+        colorPopup.target = self
+        colorPopup.action = #selector(colorChanged)
+        contentView.addSubview(colorPopup)
+
+        speedLabel = makeLabel(frame: NSRect(x: margin, y: rowOffset(1), width: labelW, height: rowH))
+        contentView.addSubview(speedLabel)
+        speedPopup = NSPopUpButton(frame: NSRect(x: margin + labelW + 8, y: rowOffset(1), width: popupW, height: rowH))
+        speedPopup.target = self
+        speedPopup.action = #selector(speedChanged)
+        contentView.addSubview(speedPopup)
+
+        displayLabel = makeLabel(frame: NSRect(x: margin, y: rowOffset(2), width: labelW, height: rowH))
+        contentView.addSubview(displayLabel)
+        displayPopup = NSPopUpButton(frame: NSRect(x: margin + labelW + 8, y: rowOffset(2), width: popupW, height: rowH))
+        displayPopup.target = self
+        displayPopup.action = #selector(displayChanged)
+        contentView.addSubview(displayPopup)
+
+        dataLabel = makeLabel(frame: NSRect(x: margin, y: rowOffset(3), width: labelW, height: rowH))
+        contentView.addSubview(dataLabel)
+        dataPopup = NSPopUpButton(frame: NSRect(x: margin + labelW + 8, y: rowOffset(3), width: popupW, height: rowH))
+        dataPopup.target = self
+        dataPopup.action = #selector(dataChanged)
+        contentView.addSubview(dataPopup)
+
+        readoutLabel = makeLabel(frame: NSRect(x: margin, y: rowOffset(4), width: labelW, height: rowH))
+        contentView.addSubview(readoutLabel)
+        readoutPopup = NSPopUpButton(frame: NSRect(x: margin + labelW + 8, y: rowOffset(4), width: popupW, height: rowH))
+        readoutPopup.target = self
+        readoutPopup.action = #selector(readoutChanged)
+        contentView.addSubview(readoutPopup)
+
+        langLabel = makeLabel(frame: NSRect(x: margin, y: rowOffset(5), width: labelW, height: rowH))
+        contentView.addSubview(langLabel)
+        langPopup = NSPopUpButton(frame: NSRect(x: margin + labelW + 8, y: rowOffset(5), width: popupW, height: rowH))
+        langPopup.target = self
+        langPopup.action = #selector(langChanged)
+        contentView.addSubview(langPopup)
+
+        offsetXLabel = makeLabel(frame: NSRect(x: margin, y: rowOffset(6), width: labelW, height: rowH))
+        contentView.addSubview(offsetXLabel)
+        offsetXField = makeNumericField(frame: NSRect(x: margin + labelW + 8, y: rowOffset(6), width: 70, height: rowH))
+        offsetXField.target = self
+        offsetXField.action = #selector(offsetXChanged)
+        contentView.addSubview(offsetXField)
+
+        offsetYLabel = makeLabel(frame: NSRect(x: margin, y: rowOffset(7), width: labelW, height: rowH))
+        contentView.addSubview(offsetYLabel)
+        offsetYField = makeNumericField(frame: NSRect(x: margin + labelW + 8, y: rowOffset(7), width: 70, height: rowH))
+        offsetYField.target = self
+        offsetYField.action = #selector(offsetYChanged)
+        contentView.addSubview(offsetYField)
+
+        thicknessLabel = makeLabel(frame: NSRect(x: margin, y: rowOffset(8), width: labelW, height: rowH))
+        contentView.addSubview(thicknessLabel)
+        thicknessField = makeNumericField(frame: NSRect(x: margin + labelW + 8, y: rowOffset(8), width: 70, height: rowH))
+        thicknessField.target = self
+        thicknessField.action = #selector(thicknessChanged)
+        contentView.addSubview(thicknessField)
+
+        let resetBtn = NSButton(frame: NSRect(x: margin, y: 20, width: 100, height: 28))
+        resetBtn.bezelStyle = .rounded
+        resetBtn.target = self
+        resetBtn.action = #selector(resetDefaults)
+        contentView.addSubview(resetBtn)
+        resetBtn.title = L10n.text("恢复默认", "Reset", lang: settings.language)
+
+        let okBtn = NSButton(frame: NSRect(x: 320 - margin - 80, y: 20, width: 80, height: 28))
+        okBtn.bezelStyle = .rounded
+        okBtn.keyEquivalent = "\r"
+        okBtn.target = self
+        okBtn.action = #selector(applyAndClose)
+        okBtn.title = L10n.text("好", "OK", lang: settings.language)
+        contentView.addSubview(okBtn)
+
+        populatePopups()
+        syncControlsFromSettings()
+    }
+
+    private func makeLabel(frame: NSRect) -> NSTextField {
+        let label = NSTextField(frame: frame)
+        label.isEditable = false
+        label.isBordered = false
+        label.backgroundColor = .clear
+        label.alignment = .right
+        label.font = NSFont.systemFont(ofSize: 13)
+        return label
+    }
+
+    private func makeNumericField(frame: NSRect) -> NSTextField {
+        let field = NSTextField(frame: frame)
+        field.alignment = .left
+        field.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        return field
+    }
+
+    private func populatePopups() {
+        colorPopup.removeAllItems()
+        for scheme in ColorScheme.allCases {
+            colorPopup.addItem(withTitle: L10n.colorSchemeName(scheme, lang: settings.language))
+        }
+        speedPopup.removeAllItems()
+        for speed in TrackingSpeed.allCases {
+            speedPopup.addItem(withTitle: L10n.speedName(speed, lang: settings.language))
+        }
+        displayPopup.removeAllItems()
+        for mode in DisplayMode.allCases {
+            displayPopup.addItem(withTitle: L10n.displayModeName(mode, lang: settings.language))
+        }
+        dataPopup.removeAllItems()
+        for source in DataSource.allCases {
+            dataPopup.addItem(withTitle: L10n.dataSourceName(source, lang: settings.language))
+        }
+        readoutPopup.removeAllItems()
+        for mode in ReadoutMode.allCases {
+            readoutPopup.addItem(withTitle: L10n.readoutModeName(mode, lang: settings.language))
+        }
+        langPopup.removeAllItems()
+        for lang in AppLanguage.allCases {
+            langPopup.addItem(withTitle: L10n.languageName(lang, lang: settings.language))
+        }
+    }
+
+    private func syncControlsFromSettings() {
+        colorPopup.selectItem(at: ColorScheme.allCases.firstIndex(of: settings.colorScheme) ?? 0)
+        speedPopup.selectItem(at: TrackingSpeed.allCases.firstIndex(of: settings.trackingSpeed) ?? 0)
+        displayPopup.selectItem(at: DisplayMode.allCases.firstIndex(of: settings.displayMode) ?? 0)
+        dataPopup.selectItem(at: DataSource.allCases.firstIndex(of: settings.dataSource) ?? 0)
+        readoutPopup.selectItem(at: ReadoutMode.allCases.firstIndex(of: settings.readoutMode) ?? 0)
+        offsetXField.stringValue = String(format: "%.0f", settings.barOffsetX)
+        offsetYField.stringValue = String(format: "%.0f", settings.barOffsetY)
+        thicknessField.stringValue = String(format: "%.1f", settings.barThickness)
+        langPopup.selectItem(at: AppLanguage.allCases.firstIndex(of: settings.language) ?? 0)
+    }
+
+    private func localizeLabels() {
+        let lang = settings.language
+        colorLabel.stringValue = L10n.text("配色方案", "Color Scheme", lang: lang)
+        speedLabel.stringValue = L10n.text("跟随速度", "Tracking", lang: lang)
+        displayLabel.stringValue = L10n.text("显示模式", "Display", lang: lang)
+        dataLabel.stringValue = L10n.text("数据源", "Data Source", lang: lang)
+        readoutLabel.stringValue = L10n.text("数值显示", "Readout", lang: lang)
+        offsetXLabel.stringValue = L10n.text("条状偏移X", "Bar Offset X", lang: lang)
+        offsetYLabel.stringValue = L10n.text("条状偏移Y", "Bar Offset Y", lang: lang)
+        thicknessLabel.stringValue = L10n.text("条状粗细", "Bar Thick", lang: lang)
+        langLabel.stringValue = L10n.text("界面语言", "Language", lang: lang)
+    }
+
+    @objc private func colorChanged() {
+        settings.colorScheme = ColorScheme.allCases[colorPopup.indexOfSelectedItem]
+        apply()
+    }
+
+    @objc private func speedChanged() {
+        settings.trackingSpeed = TrackingSpeed.allCases[speedPopup.indexOfSelectedItem]
+        apply()
+    }
+
+    @objc private func displayChanged() {
+        settings.displayMode = DisplayMode.allCases[displayPopup.indexOfSelectedItem]
+        apply()
+    }
+
+    @objc private func dataChanged() {
+        settings.dataSource = DataSource.allCases[dataPopup.indexOfSelectedItem]
+        apply()
+    }
+
+    @objc private func readoutChanged() {
+        settings.readoutMode = ReadoutMode.allCases[readoutPopup.indexOfSelectedItem]
+        apply()
+    }
+
+    @objc private func langChanged() {
+        settings.language = AppLanguage.allCases[langPopup.indexOfSelectedItem]
+        window.title = L10n.text("设置", "Settings", lang: settings.language)
+        localizeLabels()
+        populatePopups()
+        syncControlsFromSettings()
+        apply()
+    }
+
+    @objc private func offsetXChanged() {
+        settings.barOffsetX = CGFloat(Double(offsetXField.stringValue) ?? 0)
+        apply()
+    }
+
+    @objc private func offsetYChanged() {
+        settings.barOffsetY = CGFloat(Double(offsetYField.stringValue) ?? 0)
+        apply()
+    }
+
+    @objc private func thicknessChanged() {
+        let val = CGFloat(Double(thicknessField.stringValue) ?? 4.5)
+        settings.barThickness = max(val, 1.0)
+        apply()
+    }
+
+    @objc private func resetDefaults() {
+        settings = LimitRingsSettings(
+            colorScheme: .warm, trackingSpeed: .fast, displayMode: .rings,
+            dataSource: .both, readoutMode: .always,
+            barOffsetX: 0, barOffsetY: 0, barThickness: 4.5,
+            language: .zh
+        )
+        localizeLabels()
+        populatePopups()
+        syncControlsFromSettings()
+        apply()
+    }
+
+    @objc private func applyAndClose() {
+        apply()
+        window.orderOut(nil)
+    }
+
+    private func apply() {
+        settings.save()
+        onApply(settings)
     }
 }
 
@@ -663,6 +1384,10 @@ final class LimitRingsApp: NSObject {
     private let frameReader: PetFrameReader
     private let panel: NSPanel
     private let ringView: LimitRingView
+    private let barPanel: NSPanel
+    private let barView: LimitBarView
+    private let minimalPanel: NSPanel
+    private let minimalView: MinimalView
     private let stateQueue = DispatchQueue(label: "codex-pet-limit-rings.state-reader")
     private var statusItem: NSStatusItem?
     private var summaryItem: NSMenuItem?
@@ -678,9 +1403,18 @@ final class LimitRingsApp: NSObject {
     private var startTime = Date()
     private var currentPetFrameAppKit: CGRect?
     private var dragCenterOffset: CGPoint?
-    private var holdDraggedFrameUntil: Date?
+    private var barDragOffset: CGPoint?
+    private var minimalDragOffset: CGPoint?
+    private var lastPetFrameTopLeft: CGRect?
     private var ringsVisible: Bool
     private var stateReadInFlight = false
+    private var lastRawState: LimitState = .empty
+    private var holdDraggedFrameUntil: Date?
+    private var settings: LimitRingsSettings
+    private var settingsController: SettingsPanelController?
+    private var settingsItem: NSMenuItem?
+    private var refreshItem: NSMenuItem?
+    private var quitItem: NSMenuItem?
 
     init(config: LimitRingsConfig) {
         self.config = config
@@ -688,6 +1422,7 @@ final class LimitRingsApp: NSObject {
         self.frameReader = PetFrameReader(globalStatePath: config.globalStatePath)
         self.ringView = LimitRingView(frame: CGRect(origin: .zero, size: CGSize(width: config.fallbackSize, height: config.fallbackSize)))
         self.ringsVisible = UserDefaults.standard.object(forKey: ringsVisibleDefaultsKey) as? Bool ?? true
+        self.settings = LimitRingsSettings.load()
         self.panel = NSPanel(
             contentRect: CGRect(origin: .zero, size: CGSize(width: config.fallbackSize, height: config.fallbackSize)),
             styleMask: [.borderless, .nonactivatingPanel],
@@ -702,7 +1437,82 @@ final class LimitRingsApp: NSObject {
         panel.ignoresMouseEvents = true
         panel.level = .statusBar
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
+
+        self.barView = LimitBarView(frame: .zero)
+        self.barPanel = NSPanel(
+            contentRect: .zero,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        barPanel.contentView = barView
+        barPanel.backgroundColor = .clear
+        barPanel.isOpaque = false
+        barPanel.hasShadow = false
+        barPanel.ignoresMouseEvents = true
+        barPanel.level = .statusBar
+        barPanel.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
+
+        self.minimalView = MinimalView(frame: .zero)
+        self.minimalPanel = NSPanel(
+            contentRect: .zero,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        minimalPanel.contentView = minimalView
+        minimalPanel.backgroundColor = .clear
+        minimalPanel.isOpaque = false
+        minimalPanel.hasShadow = false
+        minimalPanel.ignoresMouseEvents = true
+        minimalPanel.level = .statusBar
+        minimalPanel.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
+
         super.init()
+        applySettingsToViews()
+    }
+
+    private func applySettingsToViews() {
+        ringView.colorScheme = settings.colorScheme
+        barView.colorScheme = settings.colorScheme
+        barView.showsValues = settings.readoutMode == .always
+        barView.barThickness = settings.barThickness
+        minimalView.colorScheme = settings.colorScheme
+    }
+
+    func applySettings(_ newSettings: LimitRingsSettings) {
+        let speedChanged = newSettings.trackingSpeed != settings.trackingSpeed
+        let displayModeChanged = newSettings.displayMode != settings.displayMode
+        let dataChanged = newSettings.dataSource != settings.dataSource || newSettings.readoutMode != settings.readoutMode
+        let geometryChanged = newSettings.barOffsetX != settings.barOffsetX
+            || newSettings.barOffsetY != settings.barOffsetY
+            || newSettings.barThickness != settings.barThickness
+        settings = newSettings
+        applySettingsToViews()
+        if speedChanged {
+            restartFrameTimer()
+        }
+        if displayModeChanged || geometryChanged {
+            lastPetFrameTopLeft = nil
+        }
+        if dataChanged {
+            let filtered = lastRawState.filtered(for: settings.dataSource)
+            ringView.state = filtered
+            barView.state = filtered
+            minimalView.state = filtered
+            updateSummaryMenuItem()
+            updateState()
+        }
+        updateFrame()
+        updateRingVisibility()
+        rebuildMenuLocalization()
+    }
+
+    private func restartFrameTimer() {
+        frameTimer?.invalidate()
+        frameTimer = Timer.scheduledTimer(withTimeInterval: settings.trackingSpeed.interval, repeats: true) { [weak self] _ in
+            self?.updateFrame()
+        }
     }
 
     func run() {
@@ -714,7 +1524,7 @@ final class LimitRingsApp: NSObject {
         stateTimer = Timer.scheduledTimer(withTimeInterval: limitStatePollInterval, repeats: true) { [weak self] _ in
             self?.updateState()
         }
-        frameTimer = Timer.scheduledTimer(withTimeInterval: petFramePollInterval, repeats: true) { [weak self] _ in
+        frameTimer = Timer.scheduledTimer(withTimeInterval: settings.trackingSpeed.interval, repeats: true) { [weak self] _ in
             self?.updateFrame()
         }
         hoverTimer = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { [weak self] _ in
@@ -722,7 +1532,7 @@ final class LimitRingsApp: NSObject {
         }
         installDragFollow()
         animationTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
-            guard let self else { return }
+            guard let self, self.settings.displayMode == .rings else { return }
             self.ringView.phase = Date().timeIntervalSince(self.startTime) / 4.6
         }
     }
@@ -734,7 +1544,11 @@ final class LimitRingsApp: NSObject {
             guard let self else { return }
             let state = self.stateReader.readLatest()
             DispatchQueue.main.async {
-                self.ringView.state = state
+                self.lastRawState = state
+                let filtered = state.filtered(for: self.settings.dataSource)
+                self.ringView.state = filtered
+                self.barView.state = filtered
+                self.minimalView.state = filtered
                 self.updateSummaryMenuItem()
                 self.stateReadInFlight = false
             }
@@ -751,17 +1565,47 @@ final class LimitRingsApp: NSObject {
         holdDraggedFrameUntil = nil
 
         guard let petFrame = frameReader.readPetFrameTopLeft() else {
-            currentPetFrameAppKit = nil
-            dragCenterOffset = nil
-            ringView.showsReadout = false
-            panel.orderOut(nil)
+            if currentPetFrameAppKit != nil {
+                currentPetFrameAppKit = nil
+                lastPetFrameTopLeft = nil
+                dragCenterOffset = nil
+                barDragOffset = nil
+                minimalDragOffset = nil
+                ringView.showsReadout = false
+                panel.orderOut(nil)
+                barPanel.orderOut(nil)
+                minimalPanel.orderOut(nil)
+            }
             return
         }
 
+        let moved = lastPetFrameTopLeft == nil ||
+            abs(petFrame.origin.x - lastPetFrameTopLeft!.origin.x) > 0.5 ||
+            abs(petFrame.origin.y - lastPetFrameTopLeft!.origin.y) > 0.5 ||
+            abs(petFrame.width - lastPetFrameTopLeft!.width) > 0.5 ||
+            abs(petFrame.height - lastPetFrameTopLeft!.height) > 0.5
+
         currentPetFrameAppKit = appKitRectFromTopLeft(petFrame)
-        setPanelFrame(forPetFrameTopLeft: petFrame)
+        lastPetFrameTopLeft = petFrame
+
+        if moved {
+            setPanelFrame(forPetFrameTopLeft: petFrame)
+            switch settings.displayMode {
+            case .rings: break
+            case .bars: setBarPanelFrame(forPetFrameTopLeft: petFrame)
+            case .minimal: setMinimalPanelFrame()
+            }
+        }
+
         if ringsVisible {
-            panel.orderFrontRegardless()
+            switch settings.displayMode {
+            case .rings:
+                if !panel.isVisible { panel.orderFrontRegardless() }
+            case .bars:
+                if !barPanel.isVisible { barPanel.orderFrontRegardless() }
+            case .minimal:
+                if !minimalPanel.isVisible { minimalPanel.orderFrontRegardless() }
+            }
         }
     }
 
@@ -771,7 +1615,48 @@ final class LimitRingsApp: NSObject {
         let topLeft = CGPoint(x: petFrame.midX - size / 2, y: petFrame.midY - size / 2)
         let origin = appKitOriginFromTopLeft(topLeft, size: CGSize(width: size, height: size))
 
-        panel.setFrame(CGRect(origin: origin, size: CGSize(width: size, height: size)), display: true)
+        panel.setFrame(CGRect(origin: origin, size: CGSize(width: size, height: size)), display: false)
+    }
+
+    private func setBarPanelFrame(forPetFrameTopLeft petFrame: CGRect) {
+        let barGap: CGFloat = 4.0
+        let barH: CGFloat = settings.barThickness
+        let spacing: CGFloat = 3.0
+        let textGap: CGFloat = 6.0
+        let textH: CGFloat = 12.0
+        let barWidth = petFrame.width
+
+        var rows: CGFloat = 0
+        let showText = settings.readoutMode == .always
+        if settings.dataSource != .secondary { rows += 1 }
+        if settings.dataSource != .primary { rows += 1 }
+        if rows == 0 { rows = 1 }
+
+        var h: CGFloat = rows * barH + max(rows - 1, 0) * spacing
+        if showText { h += rows * (textGap + textH) + max(rows - 1, 0) * spacing }
+
+        let barSize = CGSize(width: barWidth, height: h)
+        // Place bars ABOVE the pet (head), with user offsets
+        let barTopLeft = CGPoint(
+            x: petFrame.midX - barWidth / 2 + settings.barOffsetX,
+            y: petFrame.minY - barGap - h + settings.barOffsetY
+        )
+        let barOrigin = appKitOriginFromTopLeft(barTopLeft, size: barSize)
+        barPanel.setFrame(CGRect(origin: barOrigin, size: barSize), display: false)
+    }
+
+    private func setMinimalPanelFrame() {
+        guard let petFrame = currentPetFrameAppKit else { return }
+        let hasPrimary = settings.dataSource != .secondary
+        let hasSecondary = settings.dataSource != .primary
+        let items: CGFloat = (hasPrimary ? 1 : 0) + (hasSecondary ? 1 : 0)
+        let w: CGFloat = max(items, 1) * 42 + 10
+        let h: CGFloat = 22
+        let offsetX: CGFloat = 4.0
+        let offsetY: CGFloat = 4.0
+        // AppKit coords: maxX = right edge, maxY = top edge (y goes up)
+        let origin = CGPoint(x: petFrame.maxX + offsetX, y: petFrame.maxY + offsetY)
+        minimalPanel.setFrame(CGRect(origin: origin, size: CGSize(width: w, height: h)), display: false)
     }
 
     private func installStatusMenu() {
@@ -785,29 +1670,34 @@ final class LimitRingsApp: NSObject {
         }
 
         let menu = NSMenu()
-        let summary = NSMenuItem(title: "Waiting for Codex limit data", action: nil, keyEquivalent: "")
+        let summary = NSMenuItem(title: "", action: nil, keyEquivalent: "")
         summary.isEnabled = false
         menu.addItem(summary)
         summaryItem = summary
 
         menu.addItem(.separator())
 
-        let showItem = NSMenuItem(title: "Show Rings", action: #selector(toggleRings(_:)), keyEquivalent: "")
+        let showItem = NSMenuItem(title: "", action: #selector(toggleRings(_:)), keyEquivalent: "")
         showItem.target = self
         menu.addItem(showItem)
         showRingsItem = showItem
 
-        let refreshItem = NSMenuItem(title: "Refresh Now", action: #selector(refreshNow(_:)), keyEquivalent: "r")
-        refreshItem.target = self
-        menu.addItem(refreshItem)
+        refreshItem = NSMenuItem(title: "", action: #selector(refreshNow(_:)), keyEquivalent: "r")
+        refreshItem?.target = self
+        if let refreshItem { menu.addItem(refreshItem) }
+
+        settingsItem = NSMenuItem(title: "", action: #selector(openSettings(_:)), keyEquivalent: ",")
+        settingsItem?.target = self
+        if let settingsItem { menu.addItem(settingsItem) }
 
         menu.addItem(.separator())
 
-        let quitItem = NSMenuItem(title: "Quit Codex Pet Limit Rings", action: #selector(quit(_:)), keyEquivalent: "q")
-        quitItem.target = self
-        menu.addItem(quitItem)
+        quitItem = NSMenuItem(title: "", action: #selector(quit(_:)), keyEquivalent: "q")
+        quitItem?.target = self
+        if let quitItem { menu.addItem(quitItem) }
 
         item.menu = menu
+        rebuildMenuLocalization()
         updateSummaryMenuItem()
         updateShowRingsMenuItem()
     }
@@ -849,15 +1739,36 @@ final class LimitRingsApp: NSObject {
 
     private func updateSummaryMenuItem() {
         guard let summaryItem else { return }
-        let primary = ringView.state.primary.map { "Short \(formatPercent($0.remainingPercent))" }
-        let secondary = ringView.state.secondary.map { "Weekly \(formatPercent($0.remainingPercent))" }
+        let lang = settings.language
+        let primary = ringView.state.primary.map { "\(L10n.text("短窗口", "Short", lang: lang)) \(formatPercent($0.remainingPercent))" }
+        let secondary = ringView.state.secondary.map { "\(L10n.text("周限额", "Weekly", lang: lang)) \(formatPercent($0.remainingPercent))" }
         let pieces = [primary, secondary].compactMap { $0 }
         if pieces.isEmpty {
-            summaryItem.title = "Waiting for Codex limit data"
+            summaryItem.title = L10n.text("等待限额数据…", "Waiting for Codex limit data", lang: lang)
         } else {
-            let source = ringView.state.source == "live" ? "Live" : "Cached"
+            let source = ringView.state.source == "live"
+                ? L10n.text("实时", "Live", lang: lang)
+                : L10n.text("缓存", "Cached", lang: lang)
             summaryItem.title = "\(source) " + pieces.joined(separator: " | ")
         }
+    }
+
+    private func rebuildMenuLocalization() {
+        let lang = settings.language
+        showRingsItem?.title = L10n.text("显示", "Show", lang: lang)
+        refreshItem?.title = L10n.text("立即刷新", "Refresh Now", lang: lang)
+        settingsItem?.title = L10n.text("设置…", "Settings…", lang: lang)
+        quitItem?.title = L10n.text("退出 Codex Pet Limit Rings", "Quit Codex Pet Limit Rings", lang: lang)
+        updateSummaryMenuItem()
+    }
+
+    @objc private func openSettings(_ sender: NSMenuItem) {
+        if settingsController == nil {
+            settingsController = SettingsPanelController(settings: settings) { [weak self] newSettings in
+                self?.applySettings(newSettings)
+            }
+        }
+        settingsController?.show()
     }
 
     private func updateShowRingsMenuItem() {
@@ -867,11 +1778,26 @@ final class LimitRingsApp: NSObject {
     private func updateRingVisibility() {
         updateShowRingsMenuItem()
         if ringsVisible, currentPetFrameAppKit != nil {
-            panel.orderFrontRegardless()
+            switch settings.displayMode {
+            case .rings:
+                panel.orderFrontRegardless()
+                barPanel.orderOut(nil)
+                minimalPanel.orderOut(nil)
+            case .bars:
+                panel.orderOut(nil)
+                barPanel.orderFrontRegardless()
+                minimalPanel.orderOut(nil)
+            case .minimal:
+                panel.orderOut(nil)
+                barPanel.orderOut(nil)
+                minimalPanel.orderFrontRegardless()
+            }
             updateTooltip(at: NSEvent.mouseLocation)
         } else {
             ringView.showsReadout = false
             panel.orderOut(nil)
+            barPanel.orderOut(nil)
+            minimalPanel.orderOut(nil)
         }
     }
 
@@ -926,6 +1852,8 @@ final class LimitRingsApp: NSObject {
         guard hitTarget.contains(mouse) else { return }
 
         dragCenterOffset = CGPoint(x: panel.frame.midX - mouse.x, y: panel.frame.midY - mouse.y)
+        barDragOffset = CGPoint(x: barPanel.frame.midX - mouse.x, y: barPanel.frame.midY - mouse.y)
+        minimalDragOffset = CGPoint(x: minimalPanel.frame.midX - mouse.x, y: minimalPanel.frame.midY - mouse.y)
         holdDraggedFrameUntil = nil
     }
 
@@ -934,13 +1862,27 @@ final class LimitRingsApp: NSObject {
         let size = panel.frame.size
         let center = CGPoint(x: mouse.x + offset.x, y: mouse.y + offset.y)
         let origin = CGPoint(x: center.x - size.width / 2, y: center.y - size.height / 2)
-        panel.setFrame(CGRect(origin: origin, size: size), display: true)
+        panel.setFrame(CGRect(origin: origin, size: size), display: false)
         ringView.showsReadout = false
+
+        if let barOffset = barDragOffset {
+            let barSize = barPanel.frame.size
+            let barCenter = CGPoint(x: mouse.x + barOffset.x, y: mouse.y + barOffset.y)
+            barPanel.setFrame(CGRect(origin: CGPoint(x: barCenter.x - barSize.width / 2, y: barCenter.y - barSize.height / 2), size: barSize), display: false)
+        }
+
+        if let minimalOffset = minimalDragOffset {
+            let ms = minimalPanel.frame.size
+            let mc = CGPoint(x: mouse.x + minimalOffset.x, y: mouse.y + minimalOffset.y)
+            minimalPanel.setFrame(CGRect(origin: CGPoint(x: mc.x - ms.width / 2, y: mc.y - ms.height / 2), size: ms), display: false)
+        }
     }
 
     private func endDragFollow() {
         guard dragCenterOffset != nil else { return }
         dragCenterOffset = nil
+        barDragOffset = nil
+        minimalDragOffset = nil
         holdDraggedFrameUntil = Date().addingTimeInterval(1.25)
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.30) { [weak self] in
             self?.updateFrame()
@@ -949,11 +1891,40 @@ final class LimitRingsApp: NSObject {
 
     private func updateTooltip(at mouse: CGPoint) {
         if !ringsVisible || currentPetFrameAppKit == nil || dragCenterOffset != nil {
-            ringView.showsReadout = false
+            if settings.readoutMode == .hover {
+                ringView.showsReadout = false
+                barView.showsValues = false
+            }
             return
         }
 
-        ringView.showsReadout = isHoveringRingOrPet(mouse)
+        switch settings.displayMode {
+        case .rings:
+            if settings.readoutMode == .always {
+                ringView.showsReadout = true
+            } else {
+                ringView.showsReadout = isHoveringRingOrPet(mouse)
+            }
+            barView.showsValues = false
+        case .bars:
+            if settings.readoutMode == .always {
+                barView.showsValues = true
+            } else {
+                barView.showsValues = isHoveringBarOrPet(mouse)
+            }
+            ringView.showsReadout = false
+        case .minimal:
+            ringView.showsReadout = false
+            barView.showsValues = false
+        }
+    }
+
+    private func isHoveringBarOrPet(_ mouse: CGPoint) -> Bool {
+        if let petFrame = currentPetFrameAppKit,
+           petFrame.insetBy(dx: -10, dy: -10).contains(mouse) {
+            return true
+        }
+        return barPanel.frame.insetBy(dx: -4, dy: -4).contains(mouse)
     }
 
     private func isHoveringRingOrPet(_ mouse: CGPoint) -> Bool {
@@ -1052,7 +2023,7 @@ func renderPreview(config: LimitRingsConfig) -> Bool {
     image.lockFocus()
     NSColor.clear.setFill()
     NSRect(origin: .zero, size: size).fill()
-    LimitRingRenderer(state: state, phase: 0.18, showsReadout: true).draw(in: CGRect(origin: .zero, size: size))
+    LimitRingRenderer(state: state, phase: 0.18, showsReadout: true, colorScheme: .warm).draw(in: CGRect(origin: .zero, size: size))
     image.unlockFocus()
 
     guard let previewPath = config.previewPath,
