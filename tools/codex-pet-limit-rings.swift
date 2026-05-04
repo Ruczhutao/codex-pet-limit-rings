@@ -357,6 +357,14 @@ struct LimitRingRenderer {
         case secondary
     }
 
+    private struct LimitReadout {
+        var text: String
+        var ringPoint: CGPoint
+        var labelRect: CGRect
+        var color: NSColor
+        var angle: CGFloat
+    }
+
     private func urgency(for bucket: LimitBucket?) -> Double {
         guard let bucket else { return 0.0 }
         return min(max((45.0 - bucket.remainingPercent) / 45.0, 0.0), 1.0)
@@ -451,9 +459,9 @@ struct LimitRingRenderer {
     }
 
     private func drawLimitReadouts(_ context: CGContext, center: CGPoint, outerRadius: CGFloat, innerRadius: CGFloat, bounds: CGRect) {
+        var readouts: [LimitReadout] = []
         if let primary = state.primary {
-            drawReadout(
-                context,
+            readouts.append(makeReadout(
                 text: formatPercent(primary.remainingPercent),
                 center: center,
                 ringRadius: outerRadius,
@@ -461,12 +469,11 @@ struct LimitRingRenderer {
                 remainingPercent: primary.remainingPercent,
                 color: color(forRemaining: primary.remainingPercent, role: .primary),
                 bounds: bounds
-            )
+            ))
         }
 
         if let secondary = state.secondary {
-            drawReadout(
-                context,
+            readouts.append(makeReadout(
                 text: formatPercent(secondary.remainingPercent),
                 center: center,
                 ringRadius: innerRadius,
@@ -474,12 +481,15 @@ struct LimitRingRenderer {
                 remainingPercent: secondary.remainingPercent,
                 color: color(forRemaining: secondary.remainingPercent, role: .secondary),
                 bounds: bounds
-            )
+            ))
+        }
+
+        for readout in resolveReadoutOverlaps(readouts, bounds: bounds) {
+            drawReadout(context, readout: readout)
         }
     }
 
-    private func drawReadout(
-        _ context: CGContext,
+    private func makeReadout(
         text: String,
         center: CGPoint,
         ringRadius: CGFloat,
@@ -487,7 +497,7 @@ struct LimitRingRenderer {
         remainingPercent: Double,
         color: NSColor,
         bounds: CGRect
-    ) {
+    ) -> LimitReadout {
         let angle = -CGFloat.pi / 2.0 + CGFloat(max(remainingPercent, 1.8) / 100.0) * CGFloat.pi * 2.0
         let ringPoint = point(center: center, radius: ringRadius, angle: angle)
         let labelPoint = point(center: center, radius: labelRadius, angle: angle)
@@ -498,25 +508,83 @@ struct LimitRingRenderer {
             width: labelSize.width,
             height: labelSize.height
         )
-        let inset = bounds.insetBy(dx: 4, dy: 4)
-        labelRect.origin.x = min(max(labelRect.minX, inset.minX), inset.maxX - labelRect.width)
-        labelRect.origin.y = min(max(labelRect.minY, inset.minY), inset.maxY - labelRect.height)
+        labelRect = clamp(labelRect, inside: bounds)
+        return LimitReadout(text: text, ringPoint: ringPoint, labelRect: labelRect, color: color, angle: angle)
+    }
 
+    private func resolveReadoutOverlaps(_ readouts: [LimitReadout], bounds: CGRect) -> [LimitReadout] {
+        guard readouts.count > 1 else { return readouts }
+        var resolved = readouts
+
+        let averageAngle = resolved.map(\.angle).reduce(0, +) / CGFloat(resolved.count)
+        let tangent = CGPoint(x: -sin(averageAngle), y: cos(averageAngle))
+        for index in resolved.indices {
+            let direction = index == 0 ? -1.0 : 1.0
+            resolved[index].labelRect = clamp(resolved[index].labelRect.offsetBy(dx: tangent.x * 12.0 * direction, dy: tangent.y * 12.0 * direction), inside: bounds)
+        }
+
+        for _ in 0..<8 {
+            var changed = false
+            for firstIndex in 0..<resolved.count {
+                for secondIndex in (firstIndex + 1)..<resolved.count {
+                    let first = expanded(resolved[firstIndex].labelRect)
+                    let second = expanded(resolved[secondIndex].labelRect)
+                    guard first.intersects(second) else { continue }
+
+                    let xOverlap = min(first.maxX, second.maxX) - max(first.minX, second.minX)
+                    let yOverlap = min(first.maxY, second.maxY) - max(first.minY, second.minY)
+                    let gap: CGFloat = 6.0
+                    if xOverlap <= yOverlap {
+                        let direction: CGFloat = resolved[firstIndex].labelRect.midX <= resolved[secondIndex].labelRect.midX ? -1.0 : 1.0
+                        let nudge = xOverlap / 2.0 + gap
+                        resolved[firstIndex].labelRect = resolved[firstIndex].labelRect.offsetBy(dx: direction * nudge, dy: 0)
+                        resolved[secondIndex].labelRect = resolved[secondIndex].labelRect.offsetBy(dx: -direction * nudge, dy: 0)
+                    } else {
+                        let direction: CGFloat = resolved[firstIndex].labelRect.midY <= resolved[secondIndex].labelRect.midY ? -1.0 : 1.0
+                        let nudge = yOverlap / 2.0 + gap
+                        resolved[firstIndex].labelRect = resolved[firstIndex].labelRect.offsetBy(dx: 0, dy: direction * nudge)
+                        resolved[secondIndex].labelRect = resolved[secondIndex].labelRect.offsetBy(dx: 0, dy: -direction * nudge)
+                    }
+
+                    resolved[firstIndex].labelRect = clamp(resolved[firstIndex].labelRect, inside: bounds)
+                    resolved[secondIndex].labelRect = clamp(resolved[secondIndex].labelRect, inside: bounds)
+                    changed = true
+                }
+            }
+            if !changed { break }
+        }
+
+        return resolved
+    }
+
+    private func expanded(_ rect: CGRect) -> CGRect {
+        rect.insetBy(dx: -4.0, dy: -3.0)
+    }
+
+    private func clamp(_ rect: CGRect, inside bounds: CGRect) -> CGRect {
+        var clamped = rect
+        let inset = bounds.insetBy(dx: 4, dy: 4)
+        clamped.origin.x = min(max(clamped.minX, inset.minX), inset.maxX - clamped.width)
+        clamped.origin.y = min(max(clamped.minY, inset.minY), inset.maxY - clamped.height)
+        return clamped
+    }
+
+    private func drawReadout(_ context: CGContext, readout: LimitReadout) {
         context.saveGState()
         context.setLineCap(.round)
-        context.setStrokeColor(color.withAlphaComponent(0.44).cgColor)
+        context.setStrokeColor(readout.color.withAlphaComponent(0.44).cgColor)
         context.setLineWidth(1.2)
-        context.move(to: ringPoint)
-        context.addLine(to: CGPoint(x: labelRect.midX, y: labelRect.midY))
+        context.move(to: readout.ringPoint)
+        context.addLine(to: CGPoint(x: readout.labelRect.midX, y: readout.labelRect.midY))
         context.strokePath()
 
-        let path = CGPath(roundedRect: labelRect, cornerWidth: 8.0, cornerHeight: 8.0, transform: nil)
-        context.setShadow(offset: .zero, blur: 8.0, color: color.withAlphaComponent(0.22).cgColor)
+        let path = CGPath(roundedRect: readout.labelRect, cornerWidth: 8.0, cornerHeight: 8.0, transform: nil)
+        context.setShadow(offset: .zero, blur: 8.0, color: readout.color.withAlphaComponent(0.22).cgColor)
         context.setFillColor(NSColor(calibratedWhite: 0.055, alpha: 0.78).cgColor)
         context.addPath(path)
         context.fillPath()
         context.setShadow(offset: .zero, blur: 0.0, color: nil)
-        context.setStrokeColor(color.withAlphaComponent(0.42).cgColor)
+        context.setStrokeColor(readout.color.withAlphaComponent(0.42).cgColor)
         context.setLineWidth(1.0)
         context.addPath(path)
         context.strokePath()
@@ -525,9 +593,9 @@ struct LimitRingRenderer {
             .font: NSFont.monospacedSystemFont(ofSize: 11.5, weight: .semibold),
             .foregroundColor: NSColor(calibratedWhite: 1.0, alpha: 0.92)
         ]
-        let attributed = NSAttributedString(string: text, attributes: attrs)
+        let attributed = NSAttributedString(string: readout.text, attributes: attrs)
         let textSize = attributed.size()
-        attributed.draw(at: CGPoint(x: labelRect.midX - textSize.width / 2, y: labelRect.midY - textSize.height / 2 + 0.5))
+        attributed.draw(at: CGPoint(x: readout.labelRect.midX - textSize.width / 2, y: readout.labelRect.midY - textSize.height / 2 + 0.5))
         context.restoreGState()
     }
 
