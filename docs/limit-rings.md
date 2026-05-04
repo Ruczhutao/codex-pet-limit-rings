@@ -2,6 +2,8 @@
 
 Codex Pet Limit Rings is a native macOS companion app for Codex pets. It does not patch Codex, replace pet art, or modify the Codex app bundle. It follows the current pet with a transparent always-on-top window and exposes its own `Codex Rings` menu-bar item.
 
+The rings are pet-agnostic. They work with any pet Codex displays because the app tracks the pet window bounds rather than reading, editing, or understanding the pet artwork.
+
 ## Experience Contract
 
 - `Codex Rings` appears in the macOS menu bar.
@@ -11,6 +13,7 @@ Codex Pet Limit Rings is a native macOS companion app for Codex pets. It does no
 - Dragging the pet makes the rings follow the gesture immediately while Codex persists the new position.
 - Closing the Codex pet hides the rings.
 - Multi-display positioning uses the screen containing the pet bounds, not the currently focused screen.
+- Switching to another Codex pet requires no extra setup; the overlay follows the active pet.
 
 ## Data Flow
 

@@ -4,6 +4,8 @@ Codex pets are tiny ambient companions for the work happening in Codex. This pro
 
 The experience is a small macOS companion app. It watches where the Codex pet is, draws two polished rings around it, and keeps those rings attached to the pet as it moves. It does not patch Codex, change pet art, or modify the Codex app bundle.
 
+It works with whatever Codex pet you like. Built-in pet, custom pet, tiny dog, robot, weather daemon, or anything else: the app does not care. It only follows the pet window that Codex is already showing.
+
 ![Codex Pet Limit Rings around a Codex pet](docs/assets/codex-pet-limit-rings-screenshot.png)
 
 ## What You See
@@ -17,6 +19,8 @@ The rings are designed to be glanceable:
 - A `Codex Rings` menu-bar item lets you hide the rings, refresh data, or quit.
 
 When the Codex pet is closed, the rings disappear. When the pet comes back, they come back too. On multi-display setups, the rings stay with the pet instead of jumping to whichever screen is focused.
+
+Because the rings are drawn in a separate transparent overlay, they do not need pet-specific sprites, masks, metadata, or configuration. Change pets in Codex and the rings follow the new one automatically.
 
 ## Why It Works This Way
 
@@ -33,6 +37,8 @@ tools/install-limit-rings.sh
 ```
 
 You should see `Codex Rings` in the macOS menu bar. Use that menu to toggle `Show Rings`, refresh the latest usage data, or quit.
+
+Then use any Codex pet normally. No pet setup step is required.
 
 Run a development build without installing the login item:
 
