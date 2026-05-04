@@ -754,29 +754,25 @@ final class LimitRingsApp: NSObject {
         outer.appendArc(
             withCenter: NSPoint(x: 9, y: 9),
             radius: 6.7,
-            startAngle: 25,
-            endAngle: 330,
+            startAngle: 22,
+            endAngle: 338,
             clockwise: false
         )
-        outer.lineWidth = 1.9
+        outer.lineWidth = 2.0
         outer.lineCapStyle = .round
         outer.stroke()
 
         let inner = NSBezierPath()
         inner.appendArc(
             withCenter: NSPoint(x: 9, y: 9),
-            radius: 3.7,
-            startAngle: 205,
-            endAngle: 85,
+            radius: 3.6,
+            startAngle: 210,
+            endAngle: 82,
             clockwise: false
         )
-        inner.lineWidth = 1.4
+        inner.lineWidth = 1.6
         inner.lineCapStyle = .round
         inner.stroke()
-
-        NSColor.black.setFill()
-        NSBezierPath(ovalIn: NSRect(x: 12.7, y: 4.0, width: 2.5, height: 2.5)).fill()
-        NSBezierPath(ovalIn: NSRect(x: 3.2, y: 10.8, width: 1.8, height: 1.8)).fill()
 
         image.unlockFocus()
         image.isTemplate = true
