@@ -1,52 +1,57 @@
 # codex-pet-limit-rings
 
-Codex pets are tiny ambient companions for the work happening in Codex. This project adds one more layer to that idea: your pet can quietly show how much Codex capacity you have left, without turning the app into a dashboard.
-
-The experience is a small macOS companion app. It watches where the Codex pet is, draws two polished rings around it, and keeps those rings attached to the pet as it moves. It does not patch Codex, change pet art, or modify the Codex app bundle.
-
-It works with whatever Codex pet you like. Built-in pet, custom pet, tiny dog, robot, weather daemon, or anything else: the app does not care. It only follows the pet window that Codex is already showing.
+A macOS companion app that draws usage-limit indicators around your Codex pet — no patches, no pet-specific setup, works with any pet Codex displays.
 
 ![Codex Pet Limit Rings around a Codex pet](docs/assets/codex-pet-limit-rings-screenshot.png)
 
-## What You See
+## What It Does
 
-The rings are designed to be glanceable:
+Your Codex pet floats on screen. This app quietly follows it, showing how much capacity you have left at a glance.
 
-- The outer ring shows the short-window limit remaining.
-- The inner ring shows the weekly limit remaining.
-- Color moves from calm green/blue to amber and red as capacity gets low.
-- Hovering over the pet or rings shows the exact percentages at the current ring endpoints.
-- A small menu-bar icon lets you hide the rings, refresh data, or quit.
+**Three display modes** — pick one in the settings panel (⌘,):
 
-When the Codex pet is closed, the rings disappear. When the pet comes back, they come back too. On multi-display setups, the rings stay with the pet instead of jumping to whichever screen is focused.
+- **Rings** — Two concentric rings around the pet. Outer = short-window limit. Inner = weekly limit. Colors shift from healthy green/blue through amber to red as capacity drops.
+- **Bars** — Compact horizontal progress bars above the pet's head, with percentage labels.
+- **Minimal** — A small numeric readout (`72%  45%`) at the pet's top-right corner.
 
-Because the rings are drawn in a separate transparent overlay, they do not need pet-specific sprites, masks, metadata, or configuration. Change pets in Codex and the rings follow the new one automatically.
+**Other settings:**
 
-## Why It Works This Way
+- **Color scheme** — Warm, Cool, Cyberpunk, or Original.
+- **Data source** — Show both limits, or only short-window / weekly.
+- **Readout mode** — Always visible, or hover-to-show (works for rings and bars).
+- **Bar customization** — X/Y offset and thickness (when in bar mode).
+- **Tracking speed** — Fast (~30fps), Medium (~12fps), or Smooth (~8fps).
+- **Language** — 中文 or English.
 
-The important design choice is the companion boundary. A menu item inside Codex itself would mean patching Electron app files and redoing that patch after app updates. That is brittle and hard to open source.
+When the pet is closed, the indicator disappears. When the pet reappears, it comes back. Multi-display setups are handled correctly — the indicator stays with the pet, not the focused screen.
 
-`codex-pet-limit-rings` stays outside the Codex app. It reads local Codex state, asks ChatGPT for live usage data using the local Codex/ChatGPT token, and renders its own transparent always-on-top window around the pet. The result is reversible, inspectable, and easy for another Codex agent to install or modify.
+The overlay is pet-agnostic. Built-in pet, custom pet, tiny dog, robot — it doesn't matter. The app only tracks the pet window that Codex is already showing.
+
+## Why A Companion App
+
+A menu item inside Codex itself would require patching Electron app files (`app.asar`), dealing with integrity updates, and re-signing after every Codex update. That's brittle.
+
+`codex-pet-limit-rings` stays completely outside the Codex app. It reads local Codex state, fetches live usage data with the local ChatGPT token, and renders its own transparent always-on-top window. The result is reversible, inspectable, and agent-installable.
 
 ## Quick Start
 
-Install the rings as a login item:
+Install as a login item:
 
 ```bash
 tools/install-limit-rings.sh
 ```
 
-You should see a small rings icon in the macOS menu bar. Use that menu to toggle `Show Rings`, refresh the latest usage data, or quit.
+You'll see a small icon in the macOS menu bar. Click it to toggle the overlay, refresh usage data, open settings, or quit.
 
-Then use any Codex pet normally. No pet setup step is required.
+Use any Codex pet normally — no setup required.
 
-Run a development build without installing the login item:
+Development build (no login item):
 
 ```bash
 tools/run-limit-rings.sh
 ```
 
-Uninstall everything the installer adds:
+Uninstall:
 
 ```bash
 tools/uninstall-limit-rings.sh
@@ -59,7 +64,7 @@ This repository is structured so a Codex agent can pick it up from a GitHub link
 Ask the agent:
 
 ```text
-Use the bundled codex-pet-limit-rings skill from this repository. Install the rings companion for my Codex pet, verify the LaunchAgent is running, and confirm the rings stay anchored to the pet.
+Use the bundled codex-pet-limit-rings skill from this repository. Install the rings companion for my Codex pet, verify the LaunchAgent is running, and confirm the overlay stays anchored to the pet.
 ```
 
 The agent should read:
@@ -78,11 +83,11 @@ tools/install-codex-skill.sh
 
 The app reads only local Codex files and one ChatGPT usage endpoint:
 
-- `~/.codex/.codex-global-state.json` tells it whether the pet is open and where it is.
-- `~/.codex/auth.json` provides the local bearer token used to read live usage from ChatGPT.
-- `~/.codex/logs_2.sqlite` is used as a cached fallback if live usage is unavailable.
+- `~/.codex/.codex-global-state.json` — whether the pet is open and where it is.
+- `~/.codex/auth.json` — local bearer token for live usage data.
+- `~/.codex/logs_2.sqlite` — cached fallback if live usage is unavailable.
 
-It does not require an OpenAI API key. It does not send pet images, screenshots, prompts, or repo contents anywhere.
+No OpenAI API key required. No pet images, screenshots, prompts, or repo contents are sent anywhere.
 
 ## Project Shape
 
@@ -113,14 +118,14 @@ Build the app:
 tools/build-limit-rings.sh
 ```
 
-Render a static preview PNG:
+Render a static preview:
 
 ```bash
 swiftc tools/codex-pet-limit-rings.swift -o tmp/codex-pet-limit-rings -framework AppKit -lsqlite3
 tmp/codex-pet-limit-rings --preview tmp/limit-rings-preview.png --size 164
 ```
 
-Validate the shell scripts:
+Validate scripts:
 
 ```bash
 bash -n tools/*.sh
@@ -128,7 +133,7 @@ bash -n tools/*.sh
 
 ## Experiments
 
-The original exploration included a Python renderer for weather-mutated Codex pets. That work now lives under `experiments/weather-pets/` so the public repo can stay focused on limit rings while preserving the larger idea: Codex pets can become ambient interfaces for state, context, and mood.
+The original exploration included a Python renderer for weather-mutated Codex pets. That work lives under `experiments/weather-pets/` so the public repo stays focused on limit rings while preserving the idea: Codex pets can become ambient interfaces for state, context, and mood.
 
 ## License
 
