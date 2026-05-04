@@ -52,4 +52,4 @@ launchctl bootstrap "$GUI_TARGET" "$AGENT"
 launchctl kickstart -k "$GUI_TARGET/com.codex-pet.limit-rings"
 
 echo "Codex Pet Limit Rings installed at $APP"
-echo "Menu bar item: Codex Rings"
+echo "Menu bar item: Codex Pet Limit Rings icon"

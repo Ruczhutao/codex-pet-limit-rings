@@ -16,7 +16,7 @@ The rings are designed to be glanceable:
 - The inner ring shows the weekly limit remaining.
 - Color moves from calm green/blue to amber and red as capacity gets low.
 - Hovering over the pet or rings shows the exact percentages at the current ring endpoints.
-- A `Codex Rings` menu-bar item lets you hide the rings, refresh data, or quit.
+- A small menu-bar icon lets you hide the rings, refresh data, or quit.
 
 When the Codex pet is closed, the rings disappear. When the pet comes back, they come back too. On multi-display setups, the rings stay with the pet instead of jumping to whichever screen is focused.
 
@@ -36,7 +36,7 @@ Install the rings as a login item:
 tools/install-limit-rings.sh
 ```
 
-You should see `Codex Rings` in the macOS menu bar. Use that menu to toggle `Show Rings`, refresh the latest usage data, or quit.
+You should see a small rings icon in the macOS menu bar. Use that menu to toggle `Show Rings`, refresh the latest usage data, or quit.
 
 Then use any Codex pet normally. No pet setup step is required.
 

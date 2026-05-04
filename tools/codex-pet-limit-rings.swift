@@ -707,10 +707,12 @@ final class LimitRingsApp: NSObject {
     }
 
     private func installStatusMenu() {
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem = item
         if let button = item.button {
-            button.title = "Codex Rings"
+            button.title = ""
+            button.image = makeStatusBarIcon()
+            button.imagePosition = .imageOnly
             button.toolTip = "Codex Pet Limit Rings"
         }
 
@@ -740,6 +742,45 @@ final class LimitRingsApp: NSObject {
         item.menu = menu
         updateSummaryMenuItem()
         updateShowRingsMenuItem()
+    }
+
+    private func makeStatusBarIcon() -> NSImage {
+        let size = NSSize(width: 18, height: 18)
+        let image = NSImage(size: size)
+        image.lockFocus()
+
+        NSColor.black.setStroke()
+        let outer = NSBezierPath()
+        outer.appendArc(
+            withCenter: NSPoint(x: 9, y: 9),
+            radius: 6.7,
+            startAngle: 25,
+            endAngle: 330,
+            clockwise: false
+        )
+        outer.lineWidth = 1.9
+        outer.lineCapStyle = .round
+        outer.stroke()
+
+        let inner = NSBezierPath()
+        inner.appendArc(
+            withCenter: NSPoint(x: 9, y: 9),
+            radius: 3.7,
+            startAngle: 205,
+            endAngle: 85,
+            clockwise: false
+        )
+        inner.lineWidth = 1.4
+        inner.lineCapStyle = .round
+        inner.stroke()
+
+        NSColor.black.setFill()
+        NSBezierPath(ovalIn: NSRect(x: 12.7, y: 4.0, width: 2.5, height: 2.5)).fill()
+        NSBezierPath(ovalIn: NSRect(x: 3.2, y: 10.8, width: 1.8, height: 1.8)).fill()
+
+        image.unlockFocus()
+        image.isTemplate = true
+        return image
     }
 
     private func updateSummaryMenuItem() {
