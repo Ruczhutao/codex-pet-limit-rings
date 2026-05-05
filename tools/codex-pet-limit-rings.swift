@@ -68,6 +68,7 @@ struct LimitRingsSettings {
     var barOffsetY: CGFloat
     var barThickness: CGFloat
     var barPosition: BarPosition
+    var barFontSize: CGFloat
     var language: AppLanguage
 
     private static let kColorScheme = "CodexPetLimitRings.colorScheme"
@@ -79,6 +80,7 @@ struct LimitRingsSettings {
     private static let kBarOffsetY = "CodexPetLimitRings.barOffsetY"
     private static let kBarThickness = "CodexPetLimitRings.barThickness"
     private static let kBarPosition = "CodexPetLimitRings.barPosition"
+    private static let kBarFontSize = "CodexPetLimitRings.barFontSize"
     private static let kLanguage = "CodexPetLimitRings.language"
 
     static func load() -> LimitRingsSettings {
@@ -101,6 +103,7 @@ struct LimitRingsSettings {
             barOffsetY: d.object(forKey: kBarOffsetY) != nil ? CGFloat(d.double(forKey: kBarOffsetY)) : 0,
             barThickness: d.object(forKey: kBarThickness) != nil ? CGFloat(d.double(forKey: kBarThickness)) : 6.0,
             barPosition: BarPosition(rawValue: d.string(forKey: kBarPosition) ?? "") ?? .top,
+            barFontSize: d.object(forKey: kBarFontSize) != nil ? CGFloat(d.double(forKey: kBarFontSize)) : 9.5,
             language: AppLanguage(rawValue: d.string(forKey: kLanguage) ?? "") ?? .zh
         )
     }
@@ -116,6 +119,7 @@ struct LimitRingsSettings {
         d.set(Double(barOffsetY), forKey: Self.kBarOffsetY)
         d.set(Double(barThickness), forKey: Self.kBarThickness)
         d.set(barPosition.rawValue, forKey: Self.kBarPosition)
+        d.set(Double(barFontSize), forKey: Self.kBarFontSize)
         d.set(language.rawValue, forKey: Self.kLanguage)
     }
 }
@@ -888,6 +892,7 @@ struct LimitBarRenderer {
     var showsValues: Bool = true
     var barThickness: CGFloat = 4.5
     var isBelow: Bool = false
+    var fontSize: CGFloat = 9.5
 
     func draw(in rect: CGRect) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
@@ -908,8 +913,9 @@ struct LimitBarRenderer {
         shadow.shadowBlurRadius = 2.0
         shadow.shadowColor = NSColor.black.withAlphaComponent(0.75)
 
+        let barFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .medium)
         let textAttrs: [NSAttributedString.Key: Any] = [
-            .font: FontCache.barText,
+            .font: barFont,
             .foregroundColor: NSColor.white.withAlphaComponent(0.95),
             .shadow: shadow
         ]
@@ -1060,9 +1066,12 @@ final class LimitBarView: NSView {
     var isBelow: Bool = false {
         didSet { needsDisplay = true }
     }
+    var fontSize: CGFloat = 9.5 {
+        didSet { needsDisplay = true }
+    }
 
     override func draw(_ dirtyRect: NSRect) {
-        LimitBarRenderer(state: state, colorScheme: colorScheme, showsValues: showsValues, barThickness: barThickness, isBelow: isBelow).draw(in: bounds)
+        LimitBarRenderer(state: state, colorScheme: colorScheme, showsValues: showsValues, barThickness: barThickness, isBelow: isBelow, fontSize: fontSize).draw(in: bounds)
     }
 }
 
@@ -1190,6 +1199,8 @@ final class SettingsPanelController: NSObject {
     private var offsetXLabel: NSTextField!
     private var offsetYLabel: NSTextField!
     private var thicknessLabel: NSTextField!
+    private var fontSizeLabel: NSTextField!
+    private var fontSizeField: NSTextField!
     private var barPositionLabel: NSTextField!
     private var langLabel: NSTextField!
     private var refreshLabel: NSTextField!
@@ -1202,7 +1213,7 @@ final class SettingsPanelController: NSObject {
         self.refreshTimeProvider = refreshTimeProvider
 
         window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 320, height: 460),
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 490),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -1233,7 +1244,7 @@ final class SettingsPanelController: NSObject {
         let gap: CGFloat = 10
         let labelW: CGFloat = 90
         let popupW: CGFloat = 150
-        let topY: CGFloat = 410
+        let topY: CGFloat = 440
 
         func rowOffset(_ index: Int) -> CGFloat {
             topY - CGFloat(index) * (rowH + gap)
@@ -1302,16 +1313,23 @@ final class SettingsPanelController: NSObject {
         thicknessField.action = #selector(thicknessChanged)
         contentView.addSubview(thicknessField)
 
-        barPositionLabel = makeLabel(frame: NSRect(x: margin, y: rowOffset(9), width: labelW, height: rowH))
+        fontSizeLabel = makeLabel(frame: NSRect(x: margin, y: rowOffset(9), width: labelW, height: rowH))
+        contentView.addSubview(fontSizeLabel)
+        fontSizeField = makeNumericField(frame: NSRect(x: margin + labelW + 8, y: rowOffset(9), width: 70, height: rowH))
+        fontSizeField.target = self
+        fontSizeField.action = #selector(fontSizeChanged)
+        contentView.addSubview(fontSizeField)
+
+        barPositionLabel = makeLabel(frame: NSRect(x: margin, y: rowOffset(10), width: labelW, height: rowH))
         contentView.addSubview(barPositionLabel)
-        barPositionPopup = NSPopUpButton(frame: NSRect(x: margin + labelW + 8, y: rowOffset(9), width: popupW, height: rowH))
+        barPositionPopup = NSPopUpButton(frame: NSRect(x: margin + labelW + 8, y: rowOffset(10), width: popupW, height: rowH))
         barPositionPopup.target = self
         barPositionPopup.action = #selector(barPositionChanged)
         contentView.addSubview(barPositionPopup)
 
-        refreshLabel = makeLabel(frame: NSRect(x: margin, y: rowOffset(10), width: labelW, height: rowH))
+        refreshLabel = makeLabel(frame: NSRect(x: margin, y: rowOffset(11), width: labelW, height: rowH))
         contentView.addSubview(refreshLabel)
-        refreshValueField = NSTextField(frame: NSRect(x: margin + labelW + 8, y: rowOffset(10), width: popupW, height: rowH))
+        refreshValueField = NSTextField(frame: NSRect(x: margin + labelW + 8, y: rowOffset(11), width: popupW, height: rowH))
         refreshValueField.isEditable = false
         refreshValueField.isBordered = false
         refreshValueField.backgroundColor = .clear
@@ -1398,6 +1416,7 @@ final class SettingsPanelController: NSObject {
         offsetXField.stringValue = String(format: "%.0f", settings.barOffsetX)
         offsetYField.stringValue = String(format: "%.0f", settings.barOffsetY)
         thicknessField.stringValue = String(format: "%.1f", settings.barThickness)
+        fontSizeField.stringValue = String(format: "%.1f", settings.barFontSize)
         barPositionPopup.selectItem(at: BarPosition.allCases.firstIndex(of: settings.barPosition) ?? 0)
         langPopup.selectItem(at: AppLanguage.allCases.firstIndex(of: settings.language) ?? 0)
     }
@@ -1412,6 +1431,7 @@ final class SettingsPanelController: NSObject {
         offsetXLabel.stringValue = L10n.text("条状偏移X", "Bar Offset X", lang: lang)
         offsetYLabel.stringValue = L10n.text("条状偏移Y", "Bar Offset Y", lang: lang)
         thicknessLabel.stringValue = L10n.text("条状粗细", "Bar Thick", lang: lang)
+        fontSizeLabel.stringValue = L10n.text("数字大小", "Font Size", lang: lang)
         barPositionLabel.stringValue = L10n.text("条状位置", "Bar Position", lang: lang)
         langLabel.stringValue = L10n.text("界面语言", "Language", lang: lang)
         refreshLabel.stringValue = L10n.text("上次刷新", "Last Refresh", lang: lang)
@@ -1467,6 +1487,12 @@ final class SettingsPanelController: NSObject {
         apply()
     }
 
+    @objc private func fontSizeChanged() {
+        let val = CGFloat(Double(fontSizeField.stringValue) ?? 9.5)
+        settings.barFontSize = max(min(val, 20.0), 6.0)
+        apply()
+    }
+
     @objc private func barPositionChanged() {
         settings.barPosition = BarPosition.allCases[barPositionPopup.indexOfSelectedItem]
         apply()
@@ -1476,7 +1502,7 @@ final class SettingsPanelController: NSObject {
         settings = LimitRingsSettings(
             colorScheme: .warm, trackingSpeed: .fast, displayMode: .rings,
             dataSource: .both, readoutMode: .always,
-            barOffsetX: 0, barOffsetY: 0, barThickness: 6.0, barPosition: .top,
+            barOffsetX: 0, barOffsetY: 0, barThickness: 6.0, barPosition: .top, barFontSize: 9.5,
             language: .zh
         )
         localizeLabels()
@@ -1596,6 +1622,7 @@ final class LimitRingsApp: NSObject {
         barView.showsValues = settings.readoutMode == .always
         barView.barThickness = settings.barThickness
         barView.isBelow = settings.barPosition == .bottom
+        barView.fontSize = settings.barFontSize
         minimalView.colorScheme = settings.colorScheme
     }
 
@@ -1607,6 +1634,7 @@ final class LimitRingsApp: NSObject {
             || newSettings.barOffsetY != settings.barOffsetY
             || newSettings.barThickness != settings.barThickness
             || newSettings.barPosition != settings.barPosition
+            || newSettings.barFontSize != settings.barFontSize
         settings = newSettings
         applySettingsToViews()
         if speedChanged {
@@ -1771,8 +1799,8 @@ final class LimitRingsApp: NSObject {
         let items: CGFloat = (hasPrimary ? 1 : 0) + (hasSecondary ? 1 : 0)
         let w: CGFloat = 42
         let h: CGFloat = max(items, 1) * 14 + 4
-        let offsetX: CGFloat = 2.0
-        let offsetY: CGFloat = 2.0
+        let offsetX: CGFloat = 0.0
+        let offsetY: CGFloat = 0.0
         // AppKit coords: maxX = right edge, maxY = top edge (y goes up)
         let origin = CGPoint(x: petFrame.maxX + offsetX, y: petFrame.maxY + offsetY)
         minimalPanel.setFrame(CGRect(origin: origin, size: CGSize(width: w, height: h)), display: false)
@@ -1877,14 +1905,16 @@ final class LimitRingsApp: NSObject {
             summaryItem.title = "\(source) " + pieces.joined(separator: " | ")
 
             var timePieces: [String] = []
-            let fmt = DateFormatter()
-            fmt.dateFormat = "HH:mm"
             if let p = ringView.state.primary, let reset = p.resetAt {
                 let date = Date(timeIntervalSince1970: reset)
+                let fmt = DateFormatter()
+                fmt.dateFormat = "HH:mm"
                 timePieces.append("\(L10n.text("短窗口", "Short", lang: lang)) \(fmt.string(from: date))")
             }
             if let s = ringView.state.secondary, let reset = s.resetAt {
                 let date = Date(timeIntervalSince1970: reset)
+                let fmt = DateFormatter()
+                fmt.dateFormat = "MM-dd HH:mm"
                 timePieces.append("\(L10n.text("周限额", "Weekly", lang: lang)) \(fmt.string(from: date))")
             }
             refreshTimeItem?.title = timePieces.joined(separator: "  ")
