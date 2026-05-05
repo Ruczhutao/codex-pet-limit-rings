@@ -1509,6 +1509,7 @@ final class LimitRingsApp: NSObject {
     private let stateQueue = DispatchQueue(label: "codex-pet-limit-rings.state-reader")
     private var statusItem: NSStatusItem?
     private var summaryItem: NSMenuItem?
+    private var refreshTimeItem: NSMenuItem?
     private var showRingsItem: NSMenuItem?
     private var stateTimer: Timer?
     private var frameTimer: Timer?
@@ -1793,6 +1794,11 @@ final class LimitRingsApp: NSObject {
         menu.addItem(summary)
         summaryItem = summary
 
+        let refreshTime = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        refreshTime.isEnabled = false
+        menu.addItem(refreshTime)
+        refreshTimeItem = refreshTime
+
         menu.addItem(.separator())
 
         let showItem = NSMenuItem(title: "", action: #selector(toggleRings(_:)), keyEquivalent: "")
@@ -1863,11 +1869,25 @@ final class LimitRingsApp: NSObject {
         let pieces = [primary, secondary].compactMap { $0 }
         if pieces.isEmpty {
             summaryItem.title = L10n.text("等待限额数据…", "Waiting for Codex limit data", lang: lang)
+            refreshTimeItem?.title = ""
         } else {
             let source = ringView.state.source == "live"
                 ? L10n.text("实时", "Live", lang: lang)
                 : L10n.text("缓存", "Cached", lang: lang)
             summaryItem.title = "\(source) " + pieces.joined(separator: " | ")
+
+            var timePieces: [String] = []
+            let fmt = DateFormatter()
+            fmt.dateFormat = "HH:mm"
+            if let p = ringView.state.primary, let reset = p.resetAt {
+                let date = Date(timeIntervalSince1970: reset)
+                timePieces.append("\(L10n.text("短窗口", "Short", lang: lang)) \(fmt.string(from: date))")
+            }
+            if let s = ringView.state.secondary, let reset = s.resetAt {
+                let date = Date(timeIntervalSince1970: reset)
+                timePieces.append("\(L10n.text("周限额", "Weekly", lang: lang)) \(fmt.string(from: date))")
+            }
+            refreshTimeItem?.title = timePieces.joined(separator: "  ")
         }
     }
 
