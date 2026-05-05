@@ -2,6 +2,13 @@ import AppKit
 import Foundation
 import SQLite3
 
+private enum FontCache {
+    nonisolated(unsafe) static let ringReadout = NSFont.monospacedSystemFont(ofSize: 11.5, weight: .semibold)
+    nonisolated(unsafe) static let barText = NSFont.monospacedSystemFont(ofSize: 9.5, weight: .medium)
+    nonisolated(unsafe) static let minimalBold = NSFont.monospacedSystemFont(ofSize: 12, weight: .bold)
+    nonisolated(unsafe) static let minimalSep = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+}
+
 enum ColorScheme: String, CaseIterable {
     case warm
     case cool
@@ -752,9 +759,8 @@ struct LimitRingRenderer {
         context.addPath(path)
         context.strokePath()
 
-        let readoutFont = NSFont.monospacedSystemFont(ofSize: 11.5, weight: .semibold)
         let readoutAttrs: [NSAttributedString.Key: Any] = [
-            .font: readoutFont,
+            .font: FontCache.ringReadout,
             .foregroundColor: NSColor.white.withAlphaComponent(0.92)
         ]
         let text = readout.text as NSString
@@ -870,9 +876,8 @@ struct LimitBarRenderer {
         let textGap: CGFloat = 6.0
         let barWidth = rect.width
 
-        let barTextFont = NSFont.monospacedSystemFont(ofSize: 9.5, weight: .medium)
         let textAttrs: [NSAttributedString.Key: Any] = [
-            .font: barTextFont,
+            .font: FontCache.barText,
             .foregroundColor: NSColor.white.withAlphaComponent(0.82)
         ]
 
@@ -1000,8 +1005,8 @@ struct MinimalRenderer {
         context.setShouldAntialias(true)
         context.clear(rect)
 
-        let boldFont = NSFont.monospacedSystemFont(ofSize: 12, weight: .bold)
-        let sepFont = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        let boldFont = FontCache.minimalBold
+        let sepFont = FontCache.minimalSep
 
         var parts: [(text: String, attrs: [NSAttributedString.Key: Any])] = []
         if let primary = state.primary {
