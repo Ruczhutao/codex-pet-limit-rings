@@ -52,6 +52,11 @@ enum ReadoutMode: String, CaseIterable {
     case hover
 }
 
+enum BarPosition: String, CaseIterable {
+    case top
+    case bottom
+}
+
 struct LimitRingsSettings {
     var colorScheme: ColorScheme
     var trackingSpeed: TrackingSpeed
@@ -61,6 +66,7 @@ struct LimitRingsSettings {
     var barOffsetX: CGFloat
     var barOffsetY: CGFloat
     var barThickness: CGFloat
+    var barPosition: BarPosition
     var language: AppLanguage
 
     private static let kColorScheme = "CodexPetLimitRings.colorScheme"
@@ -71,6 +77,7 @@ struct LimitRingsSettings {
     private static let kBarOffsetX = "CodexPetLimitRings.barOffsetX"
     private static let kBarOffsetY = "CodexPetLimitRings.barOffsetY"
     private static let kBarThickness = "CodexPetLimitRings.barThickness"
+    private static let kBarPosition = "CodexPetLimitRings.barPosition"
     private static let kLanguage = "CodexPetLimitRings.language"
 
     static func load() -> LimitRingsSettings {
@@ -91,7 +98,8 @@ struct LimitRingsSettings {
             readoutMode: ReadoutMode(rawValue: d.string(forKey: kReadoutMode) ?? "") ?? .always,
             barOffsetX: d.object(forKey: kBarOffsetX) != nil ? CGFloat(d.double(forKey: kBarOffsetX)) : 0,
             barOffsetY: d.object(forKey: kBarOffsetY) != nil ? CGFloat(d.double(forKey: kBarOffsetY)) : 0,
-            barThickness: d.object(forKey: kBarThickness) != nil ? CGFloat(d.double(forKey: kBarThickness)) : 4.5,
+            barThickness: d.object(forKey: kBarThickness) != nil ? CGFloat(d.double(forKey: kBarThickness)) : 6.0,
+            barPosition: BarPosition(rawValue: d.string(forKey: kBarPosition) ?? "") ?? .top,
             language: AppLanguage(rawValue: d.string(forKey: kLanguage) ?? "") ?? .zh
         )
     }
@@ -106,6 +114,7 @@ struct LimitRingsSettings {
         d.set(Double(barOffsetX), forKey: Self.kBarOffsetX)
         d.set(Double(barOffsetY), forKey: Self.kBarOffsetY)
         d.set(Double(barThickness), forKey: Self.kBarThickness)
+        d.set(barPosition.rawValue, forKey: Self.kBarPosition)
         d.set(language.rawValue, forKey: Self.kLanguage)
     }
 }
@@ -159,6 +168,13 @@ struct L10n {
         switch mode {
         case .always: return lang == .zh ? "始终显示" : "Always"
         case .hover: return lang == .zh ? "悬停显示" : "Hover"
+        }
+    }
+
+    static func barPositionName(_ position: BarPosition, lang: AppLanguage) -> String {
+        switch position {
+        case .top: return lang == .zh ? "宠物上方" : "Above Pet"
+        case .bottom: return lang == .zh ? "宠物下方" : "Below Pet"
         }
     }
 }
@@ -1138,6 +1154,7 @@ final class SettingsPanelController: NSObject {
     private var offsetXField: NSTextField!
     private var offsetYField: NSTextField!
     private var thicknessField: NSTextField!
+    private var barPositionPopup: NSPopUpButton!
     private var colorLabel: NSTextField!
     private var speedLabel: NSTextField!
     private var displayLabel: NSTextField!
@@ -1146,6 +1163,7 @@ final class SettingsPanelController: NSObject {
     private var offsetXLabel: NSTextField!
     private var offsetYLabel: NSTextField!
     private var thicknessLabel: NSTextField!
+    private var barPositionLabel: NSTextField!
     private var langLabel: NSTextField!
 
     init(settings: LimitRingsSettings, onApply: @escaping (LimitRingsSettings) -> Void) {
@@ -1250,14 +1268,21 @@ final class SettingsPanelController: NSObject {
         thicknessField.action = #selector(thicknessChanged)
         contentView.addSubview(thicknessField)
 
-        let resetBtn = NSButton(frame: NSRect(x: margin, y: 20, width: 100, height: 28))
+        barPositionLabel = makeLabel(frame: NSRect(x: margin, y: rowOffset(9), width: labelW, height: rowH))
+        contentView.addSubview(barPositionLabel)
+        barPositionPopup = NSPopUpButton(frame: NSRect(x: margin + labelW + 8, y: rowOffset(9), width: popupW, height: rowH))
+        barPositionPopup.target = self
+        barPositionPopup.action = #selector(barPositionChanged)
+        contentView.addSubview(barPositionPopup)
+
+        let resetBtn = NSButton(frame: NSRect(x: margin, y: 10, width: 100, height: 28))
         resetBtn.bezelStyle = .rounded
         resetBtn.target = self
         resetBtn.action = #selector(resetDefaults)
         contentView.addSubview(resetBtn)
         resetBtn.title = L10n.text("恢复默认", "Reset", lang: settings.language)
 
-        let okBtn = NSButton(frame: NSRect(x: 320 - margin - 80, y: 20, width: 80, height: 28))
+        let okBtn = NSButton(frame: NSRect(x: 320 - margin - 80, y: 10, width: 80, height: 28))
         okBtn.bezelStyle = .rounded
         okBtn.keyEquivalent = "\r"
         okBtn.target = self
@@ -1311,6 +1336,10 @@ final class SettingsPanelController: NSObject {
         for lang in AppLanguage.allCases {
             langPopup.addItem(withTitle: L10n.languageName(lang, lang: settings.language))
         }
+        barPositionPopup.removeAllItems()
+        for position in BarPosition.allCases {
+            barPositionPopup.addItem(withTitle: L10n.barPositionName(position, lang: settings.language))
+        }
     }
 
     private func syncControlsFromSettings() {
@@ -1322,6 +1351,7 @@ final class SettingsPanelController: NSObject {
         offsetXField.stringValue = String(format: "%.0f", settings.barOffsetX)
         offsetYField.stringValue = String(format: "%.0f", settings.barOffsetY)
         thicknessField.stringValue = String(format: "%.1f", settings.barThickness)
+        barPositionPopup.selectItem(at: BarPosition.allCases.firstIndex(of: settings.barPosition) ?? 0)
         langPopup.selectItem(at: AppLanguage.allCases.firstIndex(of: settings.language) ?? 0)
     }
 
@@ -1335,6 +1365,7 @@ final class SettingsPanelController: NSObject {
         offsetXLabel.stringValue = L10n.text("条状偏移X", "Bar Offset X", lang: lang)
         offsetYLabel.stringValue = L10n.text("条状偏移Y", "Bar Offset Y", lang: lang)
         thicknessLabel.stringValue = L10n.text("条状粗细", "Bar Thick", lang: lang)
+        barPositionLabel.stringValue = L10n.text("条状位置", "Bar Position", lang: lang)
         langLabel.stringValue = L10n.text("界面语言", "Language", lang: lang)
     }
 
@@ -1383,8 +1414,13 @@ final class SettingsPanelController: NSObject {
     }
 
     @objc private func thicknessChanged() {
-        let val = CGFloat(Double(thicknessField.stringValue) ?? 4.5)
+        let val = CGFloat(Double(thicknessField.stringValue) ?? 6.0)
         settings.barThickness = max(val, 1.0)
+        apply()
+    }
+
+    @objc private func barPositionChanged() {
+        settings.barPosition = BarPosition.allCases[barPositionPopup.indexOfSelectedItem]
         apply()
     }
 
@@ -1392,7 +1428,7 @@ final class SettingsPanelController: NSObject {
         settings = LimitRingsSettings(
             colorScheme: .warm, trackingSpeed: .fast, displayMode: .rings,
             dataSource: .both, readoutMode: .always,
-            barOffsetX: 0, barOffsetY: 0, barThickness: 4.5,
+            barOffsetX: 0, barOffsetY: 0, barThickness: 6.0, barPosition: .top,
             language: .zh
         )
         localizeLabels()
@@ -1521,6 +1557,7 @@ final class LimitRingsApp: NSObject {
         let geometryChanged = newSettings.barOffsetX != settings.barOffsetX
             || newSettings.barOffsetY != settings.barOffsetY
             || newSettings.barThickness != settings.barThickness
+            || newSettings.barPosition != settings.barPosition
         settings = newSettings
         applySettingsToViews()
         if speedChanged {
@@ -1661,14 +1698,21 @@ final class LimitRingsApp: NSObject {
 
         let showText = settings.readoutMode == .always
         var h: CGFloat = barH
-        if showText { h += textGap + textH }
+        if showText { h += textGap * 2 + textH }
 
         let barSize = CGSize(width: barWidth, height: h)
-        // Place bar ABOVE the pet (head), with user offsets
-        let barTopLeft = CGPoint(
-            x: petFrame.midX - barWidth / 2 + settings.barOffsetX,
-            y: petFrame.minY - barGap - h + settings.barOffsetY
-        )
+        let barTopLeft: CGPoint
+        if settings.barPosition == .top {
+            barTopLeft = CGPoint(
+                x: petFrame.midX - barWidth / 2 + settings.barOffsetX,
+                y: petFrame.minY - barGap - h + settings.barOffsetY
+            )
+        } else {
+            barTopLeft = CGPoint(
+                x: petFrame.midX - barWidth / 2 + settings.barOffsetX,
+                y: petFrame.maxY + barGap + settings.barOffsetY
+            )
+        }
         let barOrigin = appKitOriginFromTopLeft(barTopLeft, size: barSize)
         barPanel.setFrame(CGRect(origin: barOrigin, size: barSize), display: false)
     }
