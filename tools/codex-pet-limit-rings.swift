@@ -14,6 +14,7 @@ enum ColorScheme: String, CaseIterable {
     case cool
     case cyberpunk
     case original
+    case dark
 }
 
 enum TrackingSpeed: String, CaseIterable {
@@ -130,6 +131,7 @@ struct L10n {
         case .cool: return lang == .zh ? "冷色调" : "Cool"
         case .cyberpunk: return lang == .zh ? "赛博朋克" : "Cyberpunk"
         case .original: return lang == .zh ? "经典" : "Original"
+        case .dark: return lang == .zh ? "深色" : "Dark"
         }
     }
 
@@ -807,6 +809,7 @@ struct LimitRingRenderer {
             case .cool: return NSColor(calibratedRed: 0.88, green: 0.22, blue: 0.38, alpha: 0.96)
             case .cyberpunk: return NSColor(calibratedRed: 1.00, green: 0.12, blue: 0.42, alpha: 0.96)
             case .original: return NSColor(calibratedRed: 1.00, green: 0.26, blue: 0.22, alpha: 0.96)
+            case .dark: return NSColor(calibratedRed: 0.85, green: 0.05, blue: 0.05, alpha: 1.00)
             }
         }
         if remaining <= 30 {
@@ -815,6 +818,7 @@ struct LimitRingRenderer {
             case .cool: return NSColor(calibratedRed: 0.68, green: 0.42, blue: 0.90, alpha: 0.96)
             case .cyberpunk: return NSColor(calibratedRed: 0.98, green: 0.80, blue: 0.12, alpha: 0.96)
             case .original: return NSColor(calibratedRed: 1.00, green: 0.68, blue: 0.20, alpha: 0.96)
+            case .dark: return NSColor(calibratedRed: 0.90, green: 0.35, blue: 0.05, alpha: 1.00)
             }
         }
         if role == .secondary {
@@ -823,6 +827,7 @@ struct LimitRingRenderer {
             case .cool: return NSColor(calibratedRed: 0.58, green: 0.45, blue: 0.92, alpha: 0.90)
             case .cyberpunk: return NSColor(calibratedRed: 0.95, green: 0.30, blue: 0.72, alpha: 0.90)
             case .original: return NSColor(calibratedRed: 0.36, green: 0.70, blue: 1.00, alpha: 0.90)
+            case .dark: return NSColor(calibratedRed: 0.10, green: 0.10, blue: 0.65, alpha: 1.00)
             }
         }
         switch colorScheme {
@@ -830,6 +835,7 @@ struct LimitRingRenderer {
         case .cool: return NSColor(calibratedRed: 0.42, green: 0.55, blue: 1.00, alpha: 0.96)
         case .cyberpunk: return NSColor(calibratedRed: 0.08, green: 0.96, blue: 0.85, alpha: 0.96)
         case .original: return NSColor(calibratedRed: 0.24, green: 0.92, blue: 0.74, alpha: 0.96)
+        case .dark: return NSColor(calibratedRed: 0.05, green: 0.55, blue: 0.25, alpha: 1.00)
         }
     }
 
@@ -839,6 +845,7 @@ struct LimitRingRenderer {
         case .cool: return (0.35 + urgency * 0.35, 0.45 - urgency * 0.10, 0.90 - urgency * 0.30)
         case .cyberpunk: return (0.20 + urgency * 0.55, 0.90 - urgency * 0.50, 0.80 - urgency * 0.35)
         case .original: return (0.23 + urgency * 0.55, 0.85 - urgency * 0.30, 0.78 - urgency * 0.48)
+        case .dark: return (0.05 + urgency * 0.35, 0.55 - urgency * 0.25, 0.25 - urgency * 0.10)
         }
     }
 
@@ -880,6 +887,7 @@ struct LimitBarRenderer {
     var colorScheme: ColorScheme = .warm
     var showsValues: Bool = true
     var barThickness: CGFloat = 4.5
+    var isBelow: Bool = false
 
     func draw(in rect: CGRect) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
@@ -894,47 +902,69 @@ struct LimitBarRenderer {
         let barHeight: CGFloat = barThickness
         let textGap: CGFloat = 6.0
         let barWidth = rect.width
-        let segGap: CGFloat = 2.0
 
         let textAttrs: [NSAttributedString.Key: Any] = [
             .font: FontCache.barText,
             .foregroundColor: NSColor.white.withAlphaComponent(0.82)
         ]
 
-        var cursorY = rect.height
+        var pieces: [String] = []
+        if let s = state.secondary { pieces.append(formatPercent(s.remainingPercent)) }
+        if let p = state.primary { pieces.append(formatPercent(p.remainingPercent)) }
+        let text = pieces.joined(separator: "  ")
+        let textSize = showsValues ? (text as NSString).size(withAttributes: textAttrs) : .zero
 
-        if showsValues {
-            var pieces: [String] = []
-            if let s = state.secondary { pieces.append(formatPercent(s.remainingPercent)) }
-            if let p = state.primary { pieces.append(formatPercent(p.remainingPercent)) }
-            let text = pieces.joined(separator: "  ")
-            let textSize = (text as NSString).size(withAttributes: textAttrs)
-            let textY = cursorY - textGap - textSize.height
-            (text as NSString).draw(at: CGPoint(x: 0, y: textY), withAttributes: textAttrs)
-            cursorY = textY - textGap
-        }
-
-        let barY = cursorY - barHeight
         let cornerRadius = barHeight / 2.0
-        let barRect = CGRect(x: 0, y: barY, width: barWidth, height: barHeight)
 
-        // Draw single track
-        drawSegmentTrack(context, rect: barRect, cornerRadius: cornerRadius)
+        if isBelow {
+            // Bar first (near pet), text below (away from pet)
+            let barY = rect.height - barHeight
+            let barRect = CGRect(x: 0, y: barY, width: barWidth, height: barHeight)
+            drawSegmentTrack(context, rect: barRect, cornerRadius: cornerRadius)
 
-        if hasPrimary && hasSecondary {
-            // Stacked overlay: both fills drawn on the same track from left
-            let secondaryColor = barColor(forRemaining: state.secondary!.remainingPercent, role: .secondary)
-            let primaryColor = barColor(forRemaining: state.primary!.remainingPercent, role: .primary)
-            // Draw secondary (weekly) first
-            drawSegmentFill(context, rect: barRect, cornerRadius: cornerRadius, remaining: state.secondary!.remainingPercent, color: secondaryColor)
-            // Draw primary (5h) on top with slight transparency so both are visible when overlapping
-            drawSegmentFill(context, rect: barRect, cornerRadius: cornerRadius, remaining: state.primary!.remainingPercent, color: primaryColor.withAlphaComponent(0.72))
-        } else if let primary = state.primary {
-            let color = barColor(forRemaining: primary.remainingPercent, role: .primary)
-            drawSegmentFill(context, rect: barRect, cornerRadius: cornerRadius, remaining: primary.remainingPercent, color: color)
-        } else if let secondary = state.secondary {
-            let color = barColor(forRemaining: secondary.remainingPercent, role: .secondary)
-            drawSegmentFill(context, rect: barRect, cornerRadius: cornerRadius, remaining: secondary.remainingPercent, color: color)
+            if hasPrimary && hasSecondary {
+                let secondaryColor = barColor(forRemaining: state.secondary!.remainingPercent, role: .secondary)
+                let primaryColor = barColor(forRemaining: state.primary!.remainingPercent, role: .primary)
+                drawSegmentFill(context, rect: barRect, cornerRadius: cornerRadius, remaining: state.secondary!.remainingPercent, color: secondaryColor)
+                drawSegmentFill(context, rect: barRect, cornerRadius: cornerRadius, remaining: state.primary!.remainingPercent, color: primaryColor.withAlphaComponent(0.72))
+            } else if let primary = state.primary {
+                let color = barColor(forRemaining: primary.remainingPercent, role: .primary)
+                drawSegmentFill(context, rect: barRect, cornerRadius: cornerRadius, remaining: primary.remainingPercent, color: color)
+            } else if let secondary = state.secondary {
+                let color = barColor(forRemaining: secondary.remainingPercent, role: .secondary)
+                drawSegmentFill(context, rect: barRect, cornerRadius: cornerRadius, remaining: secondary.remainingPercent, color: color)
+            }
+
+            if showsValues {
+                let textY = barY - textGap - textSize.height
+                (text as NSString).draw(at: CGPoint(x: 0, y: textY), withAttributes: textAttrs)
+            }
+        } else {
+            // Text first (near pet), bar below (away from pet)
+            var cursorY = rect.height
+
+            if showsValues {
+                let textY = cursorY - textGap - textSize.height
+                (text as NSString).draw(at: CGPoint(x: 0, y: textY), withAttributes: textAttrs)
+                cursorY = textY - textGap
+            }
+
+            let barY = cursorY - barHeight
+            let barRect = CGRect(x: 0, y: barY, width: barWidth, height: barHeight)
+            drawSegmentTrack(context, rect: barRect, cornerRadius: cornerRadius)
+
+            if hasPrimary && hasSecondary {
+                let secondaryColor = barColor(forRemaining: state.secondary!.remainingPercent, role: .secondary)
+                let primaryColor = barColor(forRemaining: state.primary!.remainingPercent, role: .primary)
+                drawSegmentFill(context, rect: barRect, cornerRadius: cornerRadius, remaining: state.secondary!.remainingPercent, color: secondaryColor)
+                drawSegmentFill(context, rect: barRect, cornerRadius: cornerRadius, remaining: state.primary!.remainingPercent, color: primaryColor.withAlphaComponent(0.72))
+            } else if let primary = state.primary {
+                let color = barColor(forRemaining: primary.remainingPercent, role: .primary)
+                drawSegmentFill(context, rect: barRect, cornerRadius: cornerRadius, remaining: primary.remainingPercent, color: color)
+            } else if let secondary = state.secondary {
+                let color = barColor(forRemaining: secondary.remainingPercent, role: .secondary)
+                drawSegmentFill(context, rect: barRect, cornerRadius: cornerRadius, remaining: secondary.remainingPercent, color: color)
+            }
         }
 
         context.restoreGState()
@@ -967,6 +997,7 @@ struct LimitBarRenderer {
             case .cool: return NSColor(calibratedRed: 0.88, green: 0.22, blue: 0.38, alpha: 0.96)
             case .cyberpunk: return NSColor(calibratedRed: 1.00, green: 0.12, blue: 0.42, alpha: 0.96)
             case .original: return NSColor(calibratedRed: 1.00, green: 0.26, blue: 0.22, alpha: 0.96)
+            case .dark: return NSColor(calibratedRed: 0.85, green: 0.05, blue: 0.05, alpha: 1.00)
             }
         }
         if remaining <= 30 {
@@ -975,6 +1006,7 @@ struct LimitBarRenderer {
             case .cool: return NSColor(calibratedRed: 0.68, green: 0.42, blue: 0.90, alpha: 0.96)
             case .cyberpunk: return NSColor(calibratedRed: 0.98, green: 0.80, blue: 0.12, alpha: 0.96)
             case .original: return NSColor(calibratedRed: 1.00, green: 0.68, blue: 0.20, alpha: 0.96)
+            case .dark: return NSColor(calibratedRed: 0.90, green: 0.35, blue: 0.05, alpha: 1.00)
             }
         }
         if role == .secondary {
@@ -983,6 +1015,7 @@ struct LimitBarRenderer {
             case .cool: return NSColor(calibratedRed: 0.58, green: 0.45, blue: 0.92, alpha: 0.90)
             case .cyberpunk: return NSColor(calibratedRed: 0.95, green: 0.30, blue: 0.72, alpha: 0.90)
             case .original: return NSColor(calibratedRed: 0.36, green: 0.70, blue: 1.00, alpha: 0.90)
+            case .dark: return NSColor(calibratedRed: 0.10, green: 0.10, blue: 0.65, alpha: 1.00)
             }
         }
         switch colorScheme {
@@ -990,6 +1023,7 @@ struct LimitBarRenderer {
         case .cool: return NSColor(calibratedRed: 0.42, green: 0.55, blue: 1.00, alpha: 0.96)
         case .cyberpunk: return NSColor(calibratedRed: 0.08, green: 0.96, blue: 0.85, alpha: 0.96)
         case .original: return NSColor(calibratedRed: 0.24, green: 0.92, blue: 0.74, alpha: 0.96)
+        case .dark: return NSColor(calibratedRed: 0.05, green: 0.55, blue: 0.25, alpha: 1.00)
         }
     }
 
@@ -1017,100 +1051,12 @@ final class LimitBarView: NSView {
     var barThickness: CGFloat = 4.5 {
         didSet { needsDisplay = true }
     }
+    var isBelow: Bool = false {
+        didSet { needsDisplay = true }
+    }
 
     override func draw(_ dirtyRect: NSRect) {
-        LimitBarRenderer(state: state, colorScheme: colorScheme, showsValues: showsValues, barThickness: barThickness).draw(in: bounds)
-    }
-}
-
-struct MinimalRenderer {
-    var state: LimitState
-    var colorScheme: ColorScheme = .warm
-
-    func draw(in rect: CGRect) {
-        guard state.primary != nil || state.secondary != nil else { return }
-        guard let context = NSGraphicsContext.current?.cgContext else { return }
-        context.saveGState()
-        context.setShouldAntialias(true)
-        context.clear(rect)
-
-        let boldFont = FontCache.minimalBold
-        let sepFont = FontCache.minimalSep
-
-        var parts: [(text: String, attrs: [NSAttributedString.Key: Any])] = []
-        if let primary = state.primary {
-            let attrs: [NSAttributedString.Key: Any] = [
-                .font: boldFont,
-                .foregroundColor: color(forRemaining: primary.remainingPercent)
-            ]
-            parts.append((formatPercent(primary.remainingPercent), attrs))
-        }
-        if state.primary != nil && state.secondary != nil {
-            let attrs: [NSAttributedString.Key: Any] = [
-                .font: sepFont,
-                .foregroundColor: NSColor.white.withAlphaComponent(0.25)
-            ]
-            parts.append(("  ", attrs))
-        }
-        if let secondary = state.secondary {
-            let attrs: [NSAttributedString.Key: Any] = [
-                .font: boldFont,
-                .foregroundColor: color(forRemaining: secondary.remainingPercent)
-            ]
-            parts.append((formatPercent(secondary.remainingPercent), attrs))
-        }
-
-        guard !parts.isEmpty else { context.restoreGState(); return }
-
-        let combined = NSMutableAttributedString()
-        for part in parts {
-            combined.append(NSAttributedString(string: part.text, attributes: part.attrs))
-        }
-
-        let textSize = combined.size()
-        let bgPadding: CGFloat = 4.0
-        let bgRect = CGRect(
-            x: 0,
-            y: (rect.height - textSize.height) / 2.0 - 1,
-            width: textSize.width + bgPadding * 2,
-            height: textSize.height + bgPadding
-        )
-
-        combined.draw(at: CGPoint(x: bgPadding, y: bgRect.minY + bgPadding / 2))
-
-        context.restoreGState()
-    }
-
-    private func color(forRemaining remaining: Double) -> NSColor {
-        if remaining <= 12 {
-            switch colorScheme {
-            case .warm: return NSColor(calibratedRed: 0.94, green: 0.22, blue: 0.18, alpha: 0.96)
-            case .cool: return NSColor(calibratedRed: 0.88, green: 0.22, blue: 0.38, alpha: 0.96)
-            case .cyberpunk: return NSColor(calibratedRed: 1.00, green: 0.12, blue: 0.42, alpha: 0.96)
-            case .original: return NSColor(calibratedRed: 1.00, green: 0.26, blue: 0.22, alpha: 0.96)
-            }
-        }
-        if remaining <= 30 {
-            switch colorScheme {
-            case .warm: return NSColor(calibratedRed: 0.96, green: 0.52, blue: 0.15, alpha: 0.96)
-            case .cool: return NSColor(calibratedRed: 0.68, green: 0.42, blue: 0.90, alpha: 0.96)
-            case .cyberpunk: return NSColor(calibratedRed: 0.98, green: 0.80, blue: 0.12, alpha: 0.96)
-            case .original: return NSColor(calibratedRed: 1.00, green: 0.68, blue: 0.20, alpha: 0.96)
-            }
-        }
-        switch colorScheme {
-        case .warm: return NSColor(calibratedRed: 1.00, green: 0.62, blue: 0.16, alpha: 0.96)
-        case .cool: return NSColor(calibratedRed: 0.42, green: 0.55, blue: 1.00, alpha: 0.96)
-        case .cyberpunk: return NSColor(calibratedRed: 0.08, green: 0.96, blue: 0.85, alpha: 0.96)
-        case .original: return NSColor(calibratedRed: 0.24, green: 0.92, blue: 0.74, alpha: 0.96)
-        }
-    }
-
-    private func formatPercent(_ percent: Double) -> String {
-        if abs(percent.rounded() - percent) < 0.05 {
-            return "\(Int(percent.rounded()))%"
-        }
-        return String(format: "%.1f%%", percent)
+        LimitBarRenderer(state: state, colorScheme: colorScheme, showsValues: showsValues, barThickness: barThickness, isBelow: isBelow).draw(in: bounds)
     }
 }
 
@@ -1128,6 +1074,84 @@ final class MinimalView: NSView {
         if state.primary != nil || state.secondary != nil {
             MinimalRenderer(state: state, colorScheme: colorScheme).draw(in: bounds)
         }
+    }
+}
+
+struct MinimalRenderer {
+    var state: LimitState
+    var colorScheme: ColorScheme = .warm
+
+    func draw(in rect: CGRect) {
+        guard state.primary != nil || state.secondary != nil else { return }
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+        context.saveGState()
+        context.setShouldAntialias(true)
+        context.clear(rect)
+
+        let boldFont = FontCache.minimalBold
+
+        var lines: [(text: String, color: NSColor)] = []
+        if let primary = state.primary {
+            lines.append((formatPercent(primary.remainingPercent), color(forRemaining: primary.remainingPercent)))
+        }
+        if let secondary = state.secondary {
+            lines.append((formatPercent(secondary.remainingPercent), color(forRemaining: secondary.remainingPercent)))
+        }
+
+        guard !lines.isEmpty else { context.restoreGState(); return }
+
+        let lineHeight: CGFloat = 14.0
+        let totalHeight = CGFloat(lines.count) * lineHeight
+        var cursorY = (rect.height - totalHeight) / 2.0 + totalHeight - lineHeight
+
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: boldFont
+        ]
+
+        for line in lines {
+            let lineAttrs = attrs.merging([.foregroundColor: line.color]) { _, new in new }
+            let textSize = (line.text as NSString).size(withAttributes: lineAttrs)
+            let x = (rect.width - textSize.width) / 2.0
+            (line.text as NSString).draw(at: CGPoint(x: x, y: cursorY), withAttributes: lineAttrs)
+            cursorY -= lineHeight
+        }
+
+        context.restoreGState()
+    }
+
+    private func color(forRemaining remaining: Double) -> NSColor {
+        if remaining <= 12 {
+            switch colorScheme {
+            case .warm: return NSColor(calibratedRed: 0.94, green: 0.22, blue: 0.18, alpha: 0.96)
+            case .cool: return NSColor(calibratedRed: 0.88, green: 0.22, blue: 0.38, alpha: 0.96)
+            case .cyberpunk: return NSColor(calibratedRed: 1.00, green: 0.12, blue: 0.42, alpha: 0.96)
+            case .original: return NSColor(calibratedRed: 1.00, green: 0.26, blue: 0.22, alpha: 0.96)
+            case .dark: return NSColor(calibratedRed: 0.85, green: 0.05, blue: 0.05, alpha: 1.00)
+            }
+        }
+        if remaining <= 30 {
+            switch colorScheme {
+            case .warm: return NSColor(calibratedRed: 0.96, green: 0.52, blue: 0.15, alpha: 0.96)
+            case .cool: return NSColor(calibratedRed: 0.68, green: 0.42, blue: 0.90, alpha: 0.96)
+            case .cyberpunk: return NSColor(calibratedRed: 0.98, green: 0.80, blue: 0.12, alpha: 0.96)
+            case .original: return NSColor(calibratedRed: 1.00, green: 0.68, blue: 0.20, alpha: 0.96)
+            case .dark: return NSColor(calibratedRed: 0.90, green: 0.35, blue: 0.05, alpha: 1.00)
+            }
+        }
+        switch colorScheme {
+        case .warm: return NSColor(calibratedRed: 1.00, green: 0.62, blue: 0.16, alpha: 0.96)
+        case .cool: return NSColor(calibratedRed: 0.42, green: 0.55, blue: 1.00, alpha: 0.96)
+        case .cyberpunk: return NSColor(calibratedRed: 0.08, green: 0.96, blue: 0.85, alpha: 0.96)
+        case .original: return NSColor(calibratedRed: 0.24, green: 0.92, blue: 0.74, alpha: 0.96)
+        case .dark: return NSColor(calibratedRed: 0.05, green: 0.55, blue: 0.25, alpha: 1.00)
+        }
+    }
+
+    private func formatPercent(_ percent: Double) -> String {
+        if abs(percent.rounded() - percent) < 0.05 {
+            return "\(Int(percent.rounded()))%"
+        }
+        return String(format: "%.1f%%", percent)
     }
 }
 
@@ -1536,6 +1560,7 @@ final class LimitRingsApp: NSObject {
         barView.colorScheme = settings.colorScheme
         barView.showsValues = settings.readoutMode == .always
         barView.barThickness = settings.barThickness
+        barView.isBelow = settings.barPosition == .bottom
         minimalView.colorScheme = settings.colorScheme
     }
 
@@ -1616,9 +1641,6 @@ final class LimitRingsApp: NSObject {
     }
 
     private func updateFrame() {
-        if dragCenterOffset != nil {
-            return
-        }
         if let holdDraggedFrameUntil, Date() < holdDraggedFrameUntil {
             return
         }
@@ -1647,7 +1669,9 @@ final class LimitRingsApp: NSObject {
         lastPetFrameTopLeft = petFrame
 
         if moved {
-            setPanelFrame(forPetFrameTopLeft: petFrame)
+            if dragCenterOffset == nil {
+                setPanelFrame(forPetFrameTopLeft: petFrame)
+            }
             switch settings.displayMode {
             case .rings: break
             case .bars: setBarPanelFrame(forPetFrameTopLeft: petFrame)
@@ -1709,8 +1733,8 @@ final class LimitRingsApp: NSObject {
         let hasPrimary = settings.dataSource != .secondary
         let hasSecondary = settings.dataSource != .primary
         let items: CGFloat = (hasPrimary ? 1 : 0) + (hasSecondary ? 1 : 0)
-        let w: CGFloat = max(items, 1) * 42 + 10
-        let h: CGFloat = 22
+        let w: CGFloat = 42
+        let h: CGFloat = max(items, 1) * 14 + 4
         let offsetX: CGFloat = 2.0
         let offsetY: CGFloat = 2.0
         // AppKit coords: maxX = right edge, maxY = top edge (y goes up)
