@@ -900,17 +900,23 @@ struct LimitBarRenderer {
         guard hasPrimary || hasSecondary else { context.restoreGState(); return }
 
         let barHeight: CGFloat = barThickness
-        let textGap: CGFloat = 6.0
+        let textGap: CGFloat = 2.0
         let barWidth = rect.width
+
+        let shadow = NSShadow()
+        shadow.shadowOffset = NSSize(width: 0, height: -1)
+        shadow.shadowBlurRadius = 2.0
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.75)
 
         let textAttrs: [NSAttributedString.Key: Any] = [
             .font: FontCache.barText,
-            .foregroundColor: NSColor.white.withAlphaComponent(0.82)
+            .foregroundColor: NSColor.white.withAlphaComponent(0.95),
+            .shadow: shadow
         ]
 
         var pieces: [String] = []
-        if let s = state.secondary { pieces.append(formatPercent(s.remainingPercent)) }
-        if let p = state.primary { pieces.append(formatPercent(p.remainingPercent)) }
+        if let s = state.secondary { pieces.append("W " + formatPercent(s.remainingPercent)) }
+        if let p = state.primary { pieces.append("H " + formatPercent(p.remainingPercent)) }
         let text = pieces.joined(separator: "  ")
         let textSize = showsValues ? (text as NSString).size(withAttributes: textAttrs) : .zero
 
@@ -1104,8 +1110,14 @@ struct MinimalRenderer {
         let totalHeight = CGFloat(lines.count) * lineHeight
         var cursorY = (rect.height - totalHeight) / 2.0 + totalHeight - lineHeight
 
+        let shadow = NSShadow()
+        shadow.shadowOffset = NSSize(width: 0, height: -1)
+        shadow.shadowBlurRadius = 2.0
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.75)
+
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: boldFont
+            .font: boldFont,
+            .shadow: shadow
         ]
 
         for line in lines {
@@ -1180,13 +1192,17 @@ final class SettingsPanelController: NSObject {
     private var thicknessLabel: NSTextField!
     private var barPositionLabel: NSTextField!
     private var langLabel: NSTextField!
+    private var refreshLabel: NSTextField!
+    private var refreshValueField: NSTextField!
+    private let refreshTimeProvider: () -> String?
 
-    init(settings: LimitRingsSettings, onApply: @escaping (LimitRingsSettings) -> Void) {
+    init(settings: LimitRingsSettings, onApply: @escaping (LimitRingsSettings) -> Void, refreshTimeProvider: @escaping () -> String? = { nil }) {
         self.settings = settings
         self.onApply = onApply
+        self.refreshTimeProvider = refreshTimeProvider
 
         window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 320, height: 420),
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 460),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -1200,6 +1216,9 @@ final class SettingsPanelController: NSObject {
     }
 
     func show() {
+        if let timeStr = refreshTimeProvider() {
+            refreshValueField.stringValue = timeStr
+        }
         window.center()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -1214,7 +1233,7 @@ final class SettingsPanelController: NSObject {
         let gap: CGFloat = 10
         let labelW: CGFloat = 90
         let popupW: CGFloat = 150
-        let topY: CGFloat = 370
+        let topY: CGFloat = 410
 
         func rowOffset(_ index: Int) -> CGFloat {
             topY - CGFloat(index) * (rowH + gap)
@@ -1289,6 +1308,19 @@ final class SettingsPanelController: NSObject {
         barPositionPopup.target = self
         barPositionPopup.action = #selector(barPositionChanged)
         contentView.addSubview(barPositionPopup)
+
+        refreshLabel = makeLabel(frame: NSRect(x: margin, y: rowOffset(10), width: labelW, height: rowH))
+        contentView.addSubview(refreshLabel)
+        refreshValueField = NSTextField(frame: NSRect(x: margin + labelW + 8, y: rowOffset(10), width: popupW, height: rowH))
+        refreshValueField.isEditable = false
+        refreshValueField.isBordered = false
+        refreshValueField.backgroundColor = .clear
+        refreshValueField.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        refreshValueField.textColor = NSColor.secondaryLabelColor
+        if let timeStr = refreshTimeProvider() {
+            refreshValueField.stringValue = timeStr
+        }
+        contentView.addSubview(refreshValueField)
 
         let resetBtn = NSButton(frame: NSRect(x: margin, y: 10, width: 100, height: 28))
         resetBtn.bezelStyle = .rounded
@@ -1382,6 +1414,7 @@ final class SettingsPanelController: NSObject {
         thicknessLabel.stringValue = L10n.text("条状粗细", "Bar Thick", lang: lang)
         barPositionLabel.stringValue = L10n.text("条状位置", "Bar Position", lang: lang)
         langLabel.stringValue = L10n.text("界面语言", "Language", lang: lang)
+        refreshLabel.stringValue = L10n.text("上次刷新", "Last Refresh", lang: lang)
     }
 
     @objc private func colorChanged() {
@@ -1489,6 +1522,7 @@ final class LimitRingsApp: NSObject {
     private var currentPetFrameAppKit: CGRect?
     private var dragCenterOffset: CGPoint?
     private var lastPetFrameTopLeft: CGRect?
+    private var lastRefreshTime: Date?
     private var ringsVisible: Bool
     private var stateReadInFlight = false
     private var lastRawState: LimitState = .empty
@@ -1630,6 +1664,7 @@ final class LimitRingsApp: NSObject {
             let state = self.stateReader.readLatest()
             DispatchQueue.main.async {
                 self.lastRawState = state
+                self.lastRefreshTime = Date()
                 let filtered = state.filtered(for: self.settings.dataSource)
                 self.ringView.state = filtered
                 self.barView.state = filtered
@@ -1847,9 +1882,14 @@ final class LimitRingsApp: NSObject {
 
     @objc private func openSettings(_ sender: NSMenuItem) {
         if settingsController == nil {
-            settingsController = SettingsPanelController(settings: settings) { [weak self] newSettings in
+            settingsController = SettingsPanelController(settings: settings, onApply: { [weak self] newSettings in
                 self?.applySettings(newSettings)
-            }
+            }, refreshTimeProvider: { [weak self] in
+                guard let t = self?.lastRefreshTime else { return nil }
+                let fmt = DateFormatter()
+                fmt.dateFormat = "HH:mm:ss"
+                return fmt.string(from: t)
+            })
         }
         settingsController?.show()
     }
