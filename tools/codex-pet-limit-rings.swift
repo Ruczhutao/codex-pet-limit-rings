@@ -752,13 +752,14 @@ struct LimitRingRenderer {
         context.addPath(path)
         context.strokePath()
 
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedSystemFont(ofSize: 11.5, weight: .semibold),
-            .foregroundColor: NSColor(calibratedWhite: 1.0, alpha: 0.92)
+        let readoutFont = NSFont.monospacedSystemFont(ofSize: 11.5, weight: .semibold)
+        let readoutAttrs: [NSAttributedString.Key: Any] = [
+            .font: readoutFont,
+            .foregroundColor: NSColor.white.withAlphaComponent(0.92)
         ]
-        let attributed = NSAttributedString(string: readout.text, attributes: attrs)
-        let textSize = attributed.size()
-        attributed.draw(at: CGPoint(x: readout.labelRect.midX - textSize.width / 2, y: readout.labelRect.midY - textSize.height / 2 + 0.5))
+        let text = readout.text as NSString
+        let textSize = text.size(withAttributes: readoutAttrs)
+        text.draw(at: CGPoint(x: readout.labelRect.midX - textSize.width / 2, y: readout.labelRect.midY - textSize.height / 2 + 0.5), withAttributes: readoutAttrs)
         context.restoreGState()
     }
 
@@ -869,9 +870,10 @@ struct LimitBarRenderer {
         let textGap: CGFloat = 6.0
         let barWidth = rect.width
 
+        let barTextFont = NSFont.monospacedSystemFont(ofSize: 9.5, weight: .medium)
         let textAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedSystemFont(ofSize: 9.5, weight: .medium),
-            .foregroundColor: NSColor(calibratedWhite: 1.0, alpha: 0.82)
+            .font: barTextFont,
+            .foregroundColor: NSColor.white.withAlphaComponent(0.82)
         ]
 
         var cursorY = rect.height
@@ -992,33 +994,43 @@ struct MinimalRenderer {
     var colorScheme: ColorScheme = .warm
 
     func draw(in rect: CGRect) {
+        guard state.primary != nil || state.secondary != nil else { return }
         guard let context = NSGraphicsContext.current?.cgContext else { return }
         context.saveGState()
         context.setShouldAntialias(true)
         context.clear(rect)
 
-        let combined = NSMutableAttributedString()
-        let sepAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
-            .foregroundColor: NSColor(calibratedWhite: 1.0, alpha: 0.25)
-        ]
+        let boldFont = NSFont.monospacedSystemFont(ofSize: 12, weight: .bold)
+        let sepFont = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
 
+        var parts: [(text: String, attrs: [NSAttributedString.Key: Any])] = []
         if let primary = state.primary {
             let attrs: [NSAttributedString.Key: Any] = [
-                .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .bold),
+                .font: boldFont,
                 .foregroundColor: color(forRemaining: primary.remainingPercent)
             ]
-            combined.append(NSAttributedString(string: formatPercent(primary.remainingPercent), attributes: attrs))
+            parts.append((formatPercent(primary.remainingPercent), attrs))
         }
         if state.primary != nil && state.secondary != nil {
-            combined.append(NSAttributedString(string: "  ", attributes: sepAttrs))
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: sepFont,
+                .foregroundColor: NSColor.white.withAlphaComponent(0.25)
+            ]
+            parts.append(("  ", attrs))
         }
         if let secondary = state.secondary {
             let attrs: [NSAttributedString.Key: Any] = [
-                .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .bold),
+                .font: boldFont,
                 .foregroundColor: color(forRemaining: secondary.remainingPercent)
             ]
-            combined.append(NSAttributedString(string: formatPercent(secondary.remainingPercent), attributes: attrs))
+            parts.append((formatPercent(secondary.remainingPercent), attrs))
+        }
+
+        guard !parts.isEmpty else { context.restoreGState(); return }
+
+        let combined = NSMutableAttributedString()
+        for part in parts {
+            combined.append(NSAttributedString(string: part.text, attributes: part.attrs))
         }
 
         let textSize = combined.size()
