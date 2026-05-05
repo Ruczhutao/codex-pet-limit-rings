@@ -916,28 +916,24 @@ struct LimitBarRenderer {
 
         let barY = cursorY - barHeight
         let cornerRadius = barHeight / 2.0
+        let barRect = CGRect(x: 0, y: barY, width: barWidth, height: barHeight)
+
+        // Draw single track
+        drawSegmentTrack(context, rect: barRect, cornerRadius: cornerRadius)
 
         if hasPrimary && hasSecondary {
-            let segWidth = (barWidth - segGap) / 2.0
-            let leftRect = CGRect(x: 0, y: barY, width: segWidth, height: barHeight)
-            let rightRect = CGRect(x: segWidth + segGap, y: barY, width: segWidth, height: barHeight)
-
-            let leftColor = barColor(forRemaining: state.secondary!.remainingPercent, role: .secondary)
-            let rightColor = barColor(forRemaining: state.primary!.remainingPercent, role: .primary)
-
-            drawSegmentTrack(context, rect: leftRect, cornerRadius: cornerRadius)
-            drawSegmentTrack(context, rect: rightRect, cornerRadius: cornerRadius)
-            drawSegmentFill(context, rect: leftRect, cornerRadius: cornerRadius, remaining: state.secondary!.remainingPercent, color: leftColor)
-            drawSegmentFill(context, rect: rightRect, cornerRadius: cornerRadius, remaining: state.primary!.remainingPercent, color: rightColor)
+            // Stacked overlay: both fills drawn on the same track from left
+            let secondaryColor = barColor(forRemaining: state.secondary!.remainingPercent, role: .secondary)
+            let primaryColor = barColor(forRemaining: state.primary!.remainingPercent, role: .primary)
+            // Draw secondary (weekly) first
+            drawSegmentFill(context, rect: barRect, cornerRadius: cornerRadius, remaining: state.secondary!.remainingPercent, color: secondaryColor)
+            // Draw primary (5h) on top with slight transparency so both are visible when overlapping
+            drawSegmentFill(context, rect: barRect, cornerRadius: cornerRadius, remaining: state.primary!.remainingPercent, color: primaryColor.withAlphaComponent(0.72))
         } else if let primary = state.primary {
-            let barRect = CGRect(x: 0, y: barY, width: barWidth, height: barHeight)
             let color = barColor(forRemaining: primary.remainingPercent, role: .primary)
-            drawSegmentTrack(context, rect: barRect, cornerRadius: cornerRadius)
             drawSegmentFill(context, rect: barRect, cornerRadius: cornerRadius, remaining: primary.remainingPercent, color: color)
         } else if let secondary = state.secondary {
-            let barRect = CGRect(x: 0, y: barY, width: barWidth, height: barHeight)
             let color = barColor(forRemaining: secondary.remainingPercent, role: .secondary)
-            drawSegmentTrack(context, rect: barRect, cornerRadius: cornerRadius)
             drawSegmentFill(context, rect: barRect, cornerRadius: cornerRadius, remaining: secondary.remainingPercent, color: color)
         }
 
@@ -1079,11 +1075,6 @@ struct MinimalRenderer {
             width: textSize.width + bgPadding * 2,
             height: textSize.height + bgPadding
         )
-
-        let bgPath = CGPath(roundedRect: bgRect, cornerWidth: 5.0, cornerHeight: 5.0, transform: nil)
-        context.setFillColor(NSColor(calibratedWhite: 0.04, alpha: 0.72).cgColor)
-        context.addPath(bgPath)
-        context.fillPath()
 
         combined.draw(at: CGPoint(x: bgPadding, y: bgRect.minY + bgPadding / 2))
 
@@ -1473,8 +1464,6 @@ final class LimitRingsApp: NSObject {
     private var startTime = Date()
     private var currentPetFrameAppKit: CGRect?
     private var dragCenterOffset: CGPoint?
-    private var barDragOffset: CGPoint?
-    private var minimalDragOffset: CGPoint?
     private var lastPetFrameTopLeft: CGRect?
     private var ringsVisible: Bool
     private var stateReadInFlight = false
@@ -1640,8 +1629,6 @@ final class LimitRingsApp: NSObject {
                 currentPetFrameAppKit = nil
                 lastPetFrameTopLeft = nil
                 dragCenterOffset = nil
-                barDragOffset = nil
-                minimalDragOffset = nil
                 ringView.showsReadout = false
                 panel.orderOut(nil)
                 barPanel.orderOut(nil)
@@ -1724,8 +1711,8 @@ final class LimitRingsApp: NSObject {
         let items: CGFloat = (hasPrimary ? 1 : 0) + (hasSecondary ? 1 : 0)
         let w: CGFloat = max(items, 1) * 42 + 10
         let h: CGFloat = 22
-        let offsetX: CGFloat = 4.0
-        let offsetY: CGFloat = 4.0
+        let offsetX: CGFloat = 2.0
+        let offsetY: CGFloat = 2.0
         // AppKit coords: maxX = right edge, maxY = top edge (y goes up)
         let origin = CGPoint(x: petFrame.maxX + offsetX, y: petFrame.maxY + offsetY)
         minimalPanel.setFrame(CGRect(origin: origin, size: CGSize(width: w, height: h)), display: false)
@@ -1924,8 +1911,7 @@ final class LimitRingsApp: NSObject {
         guard hitTarget.contains(mouse) else { return }
 
         dragCenterOffset = CGPoint(x: panel.frame.midX - mouse.x, y: panel.frame.midY - mouse.y)
-        barDragOffset = CGPoint(x: barPanel.frame.midX - mouse.x, y: barPanel.frame.midY - mouse.y)
-        minimalDragOffset = CGPoint(x: minimalPanel.frame.midX - mouse.x, y: minimalPanel.frame.midY - mouse.y)
+        // Bars and minimal follow the ring, not independently draggable
         holdDraggedFrameUntil = nil
     }
 
@@ -1936,25 +1922,12 @@ final class LimitRingsApp: NSObject {
         let origin = CGPoint(x: center.x - size.width / 2, y: center.y - size.height / 2)
         panel.setFrame(CGRect(origin: origin, size: size), display: false)
         ringView.showsReadout = false
-
-        if let barOffset = barDragOffset {
-            let barSize = barPanel.frame.size
-            let barCenter = CGPoint(x: mouse.x + barOffset.x, y: mouse.y + barOffset.y)
-            barPanel.setFrame(CGRect(origin: CGPoint(x: barCenter.x - barSize.width / 2, y: barCenter.y - barSize.height / 2), size: barSize), display: false)
-        }
-
-        if let minimalOffset = minimalDragOffset {
-            let ms = minimalPanel.frame.size
-            let mc = CGPoint(x: mouse.x + minimalOffset.x, y: mouse.y + minimalOffset.y)
-            minimalPanel.setFrame(CGRect(origin: CGPoint(x: mc.x - ms.width / 2, y: mc.y - ms.height / 2), size: ms), display: false)
-        }
+        // Bars and minimal follow via updateFrame, no independent drag
     }
 
     private func endDragFollow() {
         guard dragCenterOffset != nil else { return }
         dragCenterOffset = nil
-        barDragOffset = nil
-        minimalDragOffset = nil
         holdDraggedFrameUntil = Date().addingTimeInterval(1.25)
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.30) { [weak self] in
             self?.updateFrame()
