@@ -871,10 +871,14 @@ struct LimitBarRenderer {
         context.setShouldAntialias(true)
         context.clear(rect)
 
+        let hasPrimary = state.primary != nil
+        let hasSecondary = state.secondary != nil
+        guard hasPrimary || hasSecondary else { context.restoreGState(); return }
+
         let barHeight: CGFloat = barThickness
-        let spacing: CGFloat = 3.0
         let textGap: CGFloat = 6.0
         let barWidth = rect.width
+        let segGap: CGFloat = 2.0
 
         let textAttrs: [NSAttributedString.Key: Any] = [
             .font: FontCache.barText,
@@ -883,31 +887,42 @@ struct LimitBarRenderer {
 
         var cursorY = rect.height
 
-        if let primary = state.primary {
-            if showsValues {
-                let text = formatPercent(primary.remainingPercent)
-                let textSize = (text as NSString).size(withAttributes: textAttrs)
-                let textY = cursorY - textGap - textSize.height
-                (text as NSString).draw(at: CGPoint(x: 0, y: textY), withAttributes: textAttrs)
-                cursorY = textY - spacing
-            }
-            let color = barColor(forRemaining: primary.remainingPercent, role: .primary)
-            let barY = cursorY - barHeight
-            drawBar(context, rect: CGRect(x: 0, y: barY, width: barWidth, height: barHeight), remaining: primary.remainingPercent, color: color)
-            cursorY = barY - spacing
+        if showsValues {
+            var pieces: [String] = []
+            if let s = state.secondary { pieces.append(formatPercent(s.remainingPercent)) }
+            if let p = state.primary { pieces.append(formatPercent(p.remainingPercent)) }
+            let text = pieces.joined(separator: "  ")
+            let textSize = (text as NSString).size(withAttributes: textAttrs)
+            let textY = cursorY - textGap - textSize.height
+            (text as NSString).draw(at: CGPoint(x: 0, y: textY), withAttributes: textAttrs)
+            cursorY = textY - textGap
         }
 
-        if let secondary = state.secondary {
-            if showsValues {
-                let text = formatPercent(secondary.remainingPercent)
-                let textSize = (text as NSString).size(withAttributes: textAttrs)
-                let textY = cursorY - textGap - textSize.height
-                (text as NSString).draw(at: CGPoint(x: 0, y: textY), withAttributes: textAttrs)
-                cursorY = textY - spacing
-            }
+        let barY = cursorY - barHeight
+        let cornerRadius = barHeight / 2.0
+
+        if hasPrimary && hasSecondary {
+            let segWidth = (barWidth - segGap) / 2.0
+            let leftRect = CGRect(x: 0, y: barY, width: segWidth, height: barHeight)
+            let rightRect = CGRect(x: segWidth + segGap, y: barY, width: segWidth, height: barHeight)
+
+            let leftColor = barColor(forRemaining: state.secondary!.remainingPercent, role: .secondary)
+            let rightColor = barColor(forRemaining: state.primary!.remainingPercent, role: .primary)
+
+            drawSegmentTrack(context, rect: leftRect, cornerRadius: cornerRadius)
+            drawSegmentTrack(context, rect: rightRect, cornerRadius: cornerRadius)
+            drawSegmentFill(context, rect: leftRect, cornerRadius: cornerRadius, remaining: state.secondary!.remainingPercent, color: leftColor)
+            drawSegmentFill(context, rect: rightRect, cornerRadius: cornerRadius, remaining: state.primary!.remainingPercent, color: rightColor)
+        } else if let primary = state.primary {
+            let barRect = CGRect(x: 0, y: barY, width: barWidth, height: barHeight)
+            let color = barColor(forRemaining: primary.remainingPercent, role: .primary)
+            drawSegmentTrack(context, rect: barRect, cornerRadius: cornerRadius)
+            drawSegmentFill(context, rect: barRect, cornerRadius: cornerRadius, remaining: primary.remainingPercent, color: color)
+        } else if let secondary = state.secondary {
+            let barRect = CGRect(x: 0, y: barY, width: barWidth, height: barHeight)
             let color = barColor(forRemaining: secondary.remainingPercent, role: .secondary)
-            let barY = cursorY - barHeight
-            drawBar(context, rect: CGRect(x: 0, y: barY, width: barWidth, height: barHeight), remaining: secondary.remainingPercent, color: color)
+            drawSegmentTrack(context, rect: barRect, cornerRadius: cornerRadius)
+            drawSegmentFill(context, rect: barRect, cornerRadius: cornerRadius, remaining: secondary.remainingPercent, color: color)
         }
 
         context.restoreGState()
@@ -915,13 +930,14 @@ struct LimitBarRenderer {
 
     private enum BarRole { case primary, secondary }
 
-    private func drawBar(_ context: CGContext, rect: CGRect, remaining: Double, color: NSColor) {
-        let cornerRadius = rect.height / 2.0
-        let trackPath = CGPath(roundedRect: rect, cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil)
+    private func drawSegmentTrack(_ context: CGContext, rect: CGRect, cornerRadius: CGFloat) {
+        let path = CGPath(roundedRect: rect, cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil)
         context.setFillColor(NSColor(calibratedWhite: 1.0, alpha: 0.07).cgColor)
-        context.addPath(trackPath)
+        context.addPath(path)
         context.fillPath()
+    }
 
+    private func drawSegmentFill(_ context: CGContext, rect: CGRect, cornerRadius: CGFloat, remaining: Double, color: NSColor) {
         let fillWidth = max(rect.width * CGFloat(max(remaining, 0.0) / 100.0), rect.height)
         let fillRect = CGRect(x: rect.minX, y: rect.minY, width: fillWidth, height: rect.height)
         let fillPath = CGPath(roundedRect: fillRect, cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil)
@@ -929,6 +945,7 @@ struct LimitBarRenderer {
         context.setFillColor(color.cgColor)
         context.addPath(fillPath)
         context.fillPath()
+        context.setShadow(offset: .zero, blur: 0.0, color: nil)
     }
 
     private func barColor(forRemaining remaining: Double, role: BarRole) -> NSColor {
@@ -1638,22 +1655,16 @@ final class LimitRingsApp: NSObject {
     private func setBarPanelFrame(forPetFrameTopLeft petFrame: CGRect) {
         let barGap: CGFloat = 4.0
         let barH: CGFloat = settings.barThickness
-        let spacing: CGFloat = 3.0
         let textGap: CGFloat = 6.0
         let textH: CGFloat = 12.0
         let barWidth = petFrame.width
 
-        var rows: CGFloat = 0
         let showText = settings.readoutMode == .always
-        if settings.dataSource != .secondary { rows += 1 }
-        if settings.dataSource != .primary { rows += 1 }
-        if rows == 0 { rows = 1 }
-
-        var h: CGFloat = rows * barH + max(rows - 1, 0) * spacing
-        if showText { h += rows * (textGap + textH) + max(rows - 1, 0) * spacing }
+        var h: CGFloat = barH
+        if showText { h += textGap + textH }
 
         let barSize = CGSize(width: barWidth, height: h)
-        // Place bars ABOVE the pet (head), with user offsets
+        // Place bar ABOVE the pet (head), with user offsets
         let barTopLeft = CGPoint(
             x: petFrame.midX - barWidth / 2 + settings.barOffsetX,
             y: petFrame.minY - barGap - h + settings.barOffsetY
