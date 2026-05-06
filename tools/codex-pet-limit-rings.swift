@@ -1,6 +1,5 @@
 import AppKit
 import Foundation
-import SQLite3
 
 private enum FontCache {
     nonisolated(unsafe) static let ringReadout = NSFont.monospacedSystemFont(ofSize: 11.5, weight: .semibold)
@@ -58,6 +57,31 @@ enum BarPosition: String, CaseIterable {
     case bottom
 }
 
+enum RefreshInterval: String, CaseIterable {
+    case manual
+    case oneMinute
+    case twoMinutes
+    case fiveMinutes
+    case fifteenMinutes
+
+    var interval: TimeInterval? {
+        switch self {
+        case .manual: return nil
+        case .oneMinute: return 60.0
+        case .twoMinutes: return 120.0
+        case .fiveMinutes: return 300.0
+        case .fifteenMinutes: return 900.0
+        }
+    }
+}
+
+enum StatusBarContent: String, CaseIterable {
+    case icon
+    case primary
+    case secondary
+    case both
+}
+
 struct LimitRingsSettings {
     var colorScheme: ColorScheme
     var trackingSpeed: TrackingSpeed
@@ -70,6 +94,10 @@ struct LimitRingsSettings {
     var barPosition: BarPosition
     var barFontSize: CGFloat
     var language: AppLanguage
+    var refreshInterval: RefreshInterval
+    var activeAccountPath: String?
+    var defaultAccountPath: String?
+    var statusBarContent: StatusBarContent
 
     private static let kColorScheme = "CodexPetLimitRings.colorScheme"
     private static let kTrackingSpeed = "CodexPetLimitRings.trackingSpeed"
@@ -82,6 +110,10 @@ struct LimitRingsSettings {
     private static let kBarPosition = "CodexPetLimitRings.barPosition"
     private static let kBarFontSize = "CodexPetLimitRings.barFontSize"
     private static let kLanguage = "CodexPetLimitRings.language"
+    private static let kRefreshInterval = "CodexPetLimitRings.refreshInterval"
+    private static let kActiveAccountPath = "CodexPetLimitRings.activeAccountPath"
+    private static let kDefaultAccountPath = "CodexPetLimitRings.defaultAccountPath"
+    private static let kStatusBarContent = "CodexPetLimitRings.statusBarContent"
 
     static func load() -> LimitRingsSettings {
         let d = UserDefaults.standard
@@ -104,7 +136,11 @@ struct LimitRingsSettings {
             barThickness: d.object(forKey: kBarThickness) != nil ? CGFloat(d.double(forKey: kBarThickness)) : 6.0,
             barPosition: BarPosition(rawValue: d.string(forKey: kBarPosition) ?? "") ?? .top,
             barFontSize: d.object(forKey: kBarFontSize) != nil ? CGFloat(d.double(forKey: kBarFontSize)) : 9.5,
-            language: AppLanguage(rawValue: d.string(forKey: kLanguage) ?? "") ?? .zh
+            language: AppLanguage(rawValue: d.string(forKey: kLanguage) ?? "") ?? .zh,
+            refreshInterval: RefreshInterval(rawValue: d.string(forKey: kRefreshInterval) ?? "") ?? .oneMinute,
+            activeAccountPath: d.string(forKey: kActiveAccountPath),
+            defaultAccountPath: d.string(forKey: kDefaultAccountPath),
+            statusBarContent: StatusBarContent(rawValue: d.string(forKey: kStatusBarContent) ?? "") ?? .icon
         )
     }
 
@@ -121,6 +157,18 @@ struct LimitRingsSettings {
         d.set(barPosition.rawValue, forKey: Self.kBarPosition)
         d.set(Double(barFontSize), forKey: Self.kBarFontSize)
         d.set(language.rawValue, forKey: Self.kLanguage)
+        d.set(refreshInterval.rawValue, forKey: Self.kRefreshInterval)
+        d.set(statusBarContent.rawValue, forKey: Self.kStatusBarContent)
+        if let activeAccountPath {
+            d.set(activeAccountPath, forKey: Self.kActiveAccountPath)
+        } else {
+            d.removeObject(forKey: Self.kActiveAccountPath)
+        }
+        if let defaultAccountPath {
+            d.set(defaultAccountPath, forKey: Self.kDefaultAccountPath)
+        } else {
+            d.removeObject(forKey: Self.kDefaultAccountPath)
+        }
     }
 }
 
@@ -183,6 +231,33 @@ struct L10n {
         case .bottom: return lang == .zh ? "宠物下方" : "Below Pet"
         }
     }
+
+    static func refreshIntervalName(_ interval: RefreshInterval, lang: AppLanguage) -> String {
+        switch interval {
+        case .manual: return lang == .zh ? "手动" : "Manual"
+        case .oneMinute: return lang == .zh ? "1 分钟" : "1 min"
+        case .twoMinutes: return lang == .zh ? "2 分钟" : "2 min"
+        case .fiveMinutes: return lang == .zh ? "5 分钟" : "5 min"
+        case .fifteenMinutes: return lang == .zh ? "15 分钟" : "15 min"
+        }
+    }
+
+    static func refreshNowLabel(lang: AppLanguage) -> String {
+        return lang == .zh ? "立即刷新" : "Refresh Now"
+    }
+
+    static func killCodexLabel(lang: AppLanguage) -> String {
+        return lang == .zh ? "切换时退出 Codex 应用" : "Quit Codex app on switch"
+    }
+
+    static func statusBarContentName(_ content: StatusBarContent, lang: AppLanguage) -> String {
+        switch content {
+        case .icon: return lang == .zh ? "图标" : "Icon"
+        case .primary: return lang == .zh ? "短窗口" : "Short"
+        case .secondary: return lang == .zh ? "周限额" : "Weekly"
+        case .both: return lang == .zh ? "两者" : "Both"
+        }
+    }
 }
 
 struct LimitBucket {
@@ -214,7 +289,6 @@ struct LimitState {
     }
 }
 
-private let limitStatePollInterval: TimeInterval = 20.0
 private let ringsVisibleDefaultsKey = "CodexPetLimitRings.ringsVisible"
 private let liveUsageURL = URL(string: "https://chatgpt.com/backend-api/wham/usage")!
 
@@ -265,29 +339,115 @@ private struct BucketPayload: Decodable {
     }
 }
 
+struct CodexAccount: Identifiable {
+    let id = UUID()
+    let email: String
+    let homePath: URL
+}
+
+enum CodexAccountScanner {
+    static func scan() -> [CodexAccount] {
+        var accounts: [CodexAccount] = []
+        let home = FileManager.default.homeDirectoryForCurrentUser
+
+        // Default account: ~/.codex
+        let defaultHome = home.appendingPathComponent(".codex")
+        if let account = parseAccount(homePath: defaultHome) {
+            accounts.append(account)
+        }
+
+        // Additional accounts: ~/.codex-accounts/*/
+        let accountsDir = home.appendingPathComponent(".codex-accounts")
+        if let contents = try? FileManager.default.contentsOfDirectory(at: accountsDir, includingPropertiesForKeys: nil) {
+            for url in contents {
+                let accountHome = url.appendingPathComponent(".codex")
+                if FileManager.default.fileExists(atPath: accountHome.path),
+                   let account = parseAccount(homePath: accountHome) {
+                    accounts.append(account)
+                }
+            }
+        }
+
+        // CodexBar managed accounts
+        let codexBarAccountsPath = home
+            .appendingPathComponent("Library/Application Support/CodexBar/managed-codex-accounts.json")
+        if let data = try? Data(contentsOf: codexBarAccountsPath),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let accountList = json["accounts"] as? [[String: Any]] {
+            for accountDict in accountList {
+                guard let email = accountDict["email"] as? String,
+                      let managedHomePath = accountDict["managedHomePath"] as? String else { continue }
+                let accountHome = URL(fileURLWithPath: managedHomePath)
+                if FileManager.default.fileExists(atPath: accountHome.appendingPathComponent("auth.json").path) {
+                    accounts.append(CodexAccount(email: email, homePath: accountHome))
+                }
+            }
+        }
+
+        // Deduplicate by email, prefer default ~/.codex if duplicate
+        var seenEmails = Set<String>()
+        var defaultAccount: CodexAccount?
+        var otherAccounts: [CodexAccount] = []
+        for account in accounts {
+            if seenEmails.contains(account.email) { continue }
+            seenEmails.insert(account.email)
+            if account.homePath.path == FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex").path {
+                defaultAccount = account
+            } else {
+                otherAccounts.append(account)
+            }
+        }
+        if let defaultAccount {
+            return [defaultAccount] + otherAccounts
+        }
+        return otherAccounts
+    }
+
+    private static func parseAccount(homePath: URL) -> CodexAccount? {
+        let authPath = homePath.appendingPathComponent("auth.json")
+        guard let data = try? Data(contentsOf: authPath),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let tokens = json["tokens"] as? [String: Any],
+              let idToken = tokens["id_token"] as? String else {
+            return nil
+        }
+        guard let email = extractEmailFromJWT(idToken) else { return nil }
+        return CodexAccount(email: email, homePath: homePath)
+    }
+
+    private static func extractEmailFromJWT(_ jwt: String) -> String? {
+        let parts = jwt.split(separator: ".")
+        guard parts.count >= 2 else { return nil }
+        let payloadBase64 = String(parts[1])
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        let padding = 4 - payloadBase64.count % 4
+        let padded = payloadBase64 + String(repeating: "=", count: padding == 4 ? 0 : padding)
+        guard let data = Data(base64Encoded: padded),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return json["email"] as? String
+    }
+}
+
 struct LimitRingsConfig {
     var codexHome: URL
     var globalStatePath: URL
-    var logsPath: URL
     var authPath: URL
     var previewPath: URL?
     var fallbackSize: CGFloat = 220
 }
 
 final class LimitStateReader {
-    private let logsPath: URL
     private let authPath: URL
 
-    init(logsPath: URL, authPath: URL) {
-        self.logsPath = logsPath
+    init(authPath: URL) {
         self.authPath = authPath
     }
 
     func readLatest() -> LimitState {
-        if let liveState = readLiveUsage() {
-            return liveState
-        }
-        return readLatestLog()
+        return readLiveUsage() ?? .empty
     }
 
     private func readLiveUsage() -> LimitState? {
@@ -340,99 +500,6 @@ final class LimitStateReader {
             return nil
         }
         return token
-    }
-
-    private func readLatestLog() -> LimitState {
-        guard FileManager.default.fileExists(atPath: logsPath.path) else {
-            return .empty
-        }
-
-        var db: OpaquePointer?
-        let openResult = sqlite3_open_v2(logsPath.path, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil)
-        guard openResult == SQLITE_OK, let db else {
-            return .empty
-        }
-        defer { sqlite3_close(db) }
-
-        let sql = """
-        SELECT feedback_log_body
-        FROM logs
-        WHERE feedback_log_body LIKE '%"type":"codex.rate_limits"%'
-        ORDER BY ts DESC, ts_nanos DESC, id DESC
-        LIMIT 1
-        """
-
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
-            return .empty
-        }
-        defer { sqlite3_finalize(statement) }
-
-        guard sqlite3_step(statement) == SQLITE_ROW,
-              let cText = sqlite3_column_text(statement, 0) else {
-            return .empty
-        }
-
-        let body = String(cString: cText)
-        guard let json = extractRateLimitJSON(from: body),
-              let data = json.data(using: .utf8),
-              let payload = try? JSONDecoder().decode(EventPayload.self, from: data) else {
-            return .empty
-        }
-
-        let primary = (payload.rate_limits?.primary ?? payload.rate_limits?.primary_window)?.toBucket()
-        let secondary = (payload.rate_limits?.secondary ?? payload.rate_limits?.secondary_window)?.toBucket()
-        let additional = (payload.additional_rate_limits ?? [:])
-            .compactMap { name, payload -> (String, LimitBucket)? in
-                guard let bucket = (payload.primary ?? payload.primary_window ?? payload.secondary ?? payload.secondary_window)?.toBucket() else {
-                    return nil
-                }
-                return (name, bucket)
-            }
-            .sorted { $0.0.localizedCaseInsensitiveCompare($1.0) == .orderedAscending }
-
-        return LimitState(planType: payload.plan_type, primary: primary, secondary: secondary, additional: additional, observedAt: Date(), source: "log")
-    }
-
-    private func extractRateLimitJSON(from body: String) -> String? {
-        guard let start = body.range(of: "{\"type\":\"codex.rate_limits\"")?.lowerBound else {
-            return nil
-        }
-
-        var depth = 0
-        var inString = false
-        var escaping = false
-        var endIndex: String.Index?
-        var index = start
-
-        while index < body.endIndex {
-            let char = body[index]
-            if inString {
-                if escaping {
-                    escaping = false
-                } else if char == "\\" {
-                    escaping = true
-                } else if char == "\"" {
-                    inString = false
-                }
-            } else {
-                if char == "\"" {
-                    inString = true
-                } else if char == "{" {
-                    depth += 1
-                } else if char == "}" {
-                    depth -= 1
-                    if depth == 0 {
-                        endIndex = body.index(after: index)
-                        break
-                    }
-                }
-            }
-            index = body.index(after: index)
-        }
-
-        guard let endIndex else { return nil }
-        return String(body[start..<endIndex])
     }
 }
 
@@ -1205,12 +1272,17 @@ final class SettingsPanelController: NSObject {
     private var langLabel: NSTextField!
     private var refreshLabel: NSTextField!
     private var refreshValueField: NSTextField!
+    private var refreshIntervalLabel: NSTextField!
+    private var refreshIntervalPopup: NSPopUpButton!
+    private var manualRefreshBtn: NSButton!
     private let refreshTimeProvider: () -> String?
+    private let onManualRefresh: () -> Void
 
-    init(settings: LimitRingsSettings, onApply: @escaping (LimitRingsSettings) -> Void, refreshTimeProvider: @escaping () -> String? = { nil }) {
+    init(settings: LimitRingsSettings, onApply: @escaping (LimitRingsSettings) -> Void, refreshTimeProvider: @escaping () -> String? = { nil }, onManualRefresh: @escaping () -> Void = {}) {
         self.settings = settings
         self.onApply = onApply
         self.refreshTimeProvider = refreshTimeProvider
+        self.onManualRefresh = onManualRefresh
 
         window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 320, height: 490),
@@ -1340,6 +1412,19 @@ final class SettingsPanelController: NSObject {
         }
         contentView.addSubview(refreshValueField)
 
+        refreshIntervalLabel = makeLabel(frame: NSRect(x: margin, y: rowOffset(12), width: labelW, height: rowH))
+        contentView.addSubview(refreshIntervalLabel)
+        refreshIntervalPopup = NSPopUpButton(frame: NSRect(x: margin + labelW + 8, y: rowOffset(12), width: popupW, height: rowH))
+        refreshIntervalPopup.target = self
+        refreshIntervalPopup.action = #selector(refreshIntervalChanged)
+        contentView.addSubview(refreshIntervalPopup)
+
+        manualRefreshBtn = NSButton(frame: NSRect(x: margin + labelW + 8, y: rowOffset(13), width: popupW, height: rowH))
+        manualRefreshBtn.bezelStyle = .rounded
+        manualRefreshBtn.target = self
+        manualRefreshBtn.action = #selector(manualRefresh)
+        contentView.addSubview(manualRefreshBtn)
+
         let resetBtn = NSButton(frame: NSRect(x: margin, y: 10, width: 100, height: 28))
         resetBtn.bezelStyle = .rounded
         resetBtn.target = self
@@ -1405,6 +1490,10 @@ final class SettingsPanelController: NSObject {
         for position in BarPosition.allCases {
             barPositionPopup.addItem(withTitle: L10n.barPositionName(position, lang: settings.language))
         }
+        refreshIntervalPopup.removeAllItems()
+        for interval in RefreshInterval.allCases {
+            refreshIntervalPopup.addItem(withTitle: L10n.refreshIntervalName(interval, lang: settings.language))
+        }
     }
 
     private func syncControlsFromSettings() {
@@ -1419,6 +1508,7 @@ final class SettingsPanelController: NSObject {
         fontSizeField.stringValue = String(format: "%.1f", settings.barFontSize)
         barPositionPopup.selectItem(at: BarPosition.allCases.firstIndex(of: settings.barPosition) ?? 0)
         langPopup.selectItem(at: AppLanguage.allCases.firstIndex(of: settings.language) ?? 0)
+        refreshIntervalPopup.selectItem(at: RefreshInterval.allCases.firstIndex(of: settings.refreshInterval) ?? 0)
     }
 
     private func localizeLabels() {
@@ -1435,15 +1525,12 @@ final class SettingsPanelController: NSObject {
         barPositionLabel.stringValue = L10n.text("条状位置", "Bar Position", lang: lang)
         langLabel.stringValue = L10n.text("界面语言", "Language", lang: lang)
         refreshLabel.stringValue = L10n.text("上次刷新", "Last Refresh", lang: lang)
+        refreshIntervalLabel.stringValue = L10n.text("自动刷新", "Auto Refresh", lang: lang)
+        manualRefreshBtn.title = L10n.refreshNowLabel(lang: lang)
     }
 
     @objc private func colorChanged() {
         settings.colorScheme = ColorScheme.allCases[colorPopup.indexOfSelectedItem]
-        apply()
-    }
-
-    @objc private func speedChanged() {
-        settings.trackingSpeed = TrackingSpeed.allCases[speedPopup.indexOfSelectedItem]
         apply()
     }
 
@@ -1454,6 +1541,11 @@ final class SettingsPanelController: NSObject {
 
     @objc private func dataChanged() {
         settings.dataSource = DataSource.allCases[dataPopup.indexOfSelectedItem]
+        apply()
+    }
+
+    @objc private func speedChanged() {
+        settings.trackingSpeed = TrackingSpeed.allCases[speedPopup.indexOfSelectedItem]
         apply()
     }
 
@@ -1498,12 +1590,23 @@ final class SettingsPanelController: NSObject {
         apply()
     }
 
+    @objc private func refreshIntervalChanged() {
+        settings.refreshInterval = RefreshInterval.allCases[refreshIntervalPopup.indexOfSelectedItem]
+        apply()
+    }
+
+    @objc private func manualRefresh() {
+        onManualRefresh()
+    }
+
     @objc private func resetDefaults() {
         settings = LimitRingsSettings(
             colorScheme: .warm, trackingSpeed: .fast, displayMode: .rings,
             dataSource: .both, readoutMode: .always,
             barOffsetX: 0, barOffsetY: 0, barThickness: 6.0, barPosition: .top, barFontSize: 9.5,
-            language: .zh
+            language: .zh, refreshInterval: .oneMinute, activeAccountPath: nil,
+            defaultAccountPath: nil,
+            statusBarContent: .icon
         )
         localizeLabels()
         populatePopups()
@@ -1523,9 +1626,9 @@ final class SettingsPanelController: NSObject {
 }
 
 final class LimitRingsApp: NSObject {
-    private let config: LimitRingsConfig
-    private let stateReader: LimitStateReader
-    private let frameReader: PetFrameReader
+    private var config: LimitRingsConfig
+    private var stateReader: LimitStateReader
+    private var frameReader: PetFrameReader
     private let panel: NSPanel
     private let ringView: LimitRingView
     private let barPanel: NSPanel
@@ -1544,7 +1647,6 @@ final class LimitRingsApp: NSObject {
     private var mouseDownMonitor: Any?
     private var mouseDragMonitor: Any?
     private var mouseUpMonitor: Any?
-    private var mouseMoveMonitor: Any?
     private var startTime = Date()
     private var currentPetFrameAppKit: CGRect?
     private var dragCenterOffset: CGPoint?
@@ -1559,10 +1661,21 @@ final class LimitRingsApp: NSObject {
     private var settingsItem: NSMenuItem?
     private var refreshItem: NSMenuItem?
     private var quitItem: NSMenuItem?
+    private var accountMenuItem: NSMenuItem?
+    private var defaultAccountMenuItem: NSMenuItem?
+    private var displayModeMenuItem: NSMenuItem?
+    private var dataSourceMenuItem: NSMenuItem?
+    private var statusBarContentMenuItem: NSMenuItem?
+    private var quitCodexItem: NSMenuItem?
+    private var scannedAccountsForMenu: [CodexAccount] = []
+    private let summaryDateFormatter: DateFormatter = {
+        let fmt = DateFormatter()
+        return fmt
+    }()
 
     init(config: LimitRingsConfig) {
         self.config = config
-        self.stateReader = LimitStateReader(logsPath: config.logsPath, authPath: config.authPath)
+        self.stateReader = LimitStateReader(authPath: config.authPath)
         self.frameReader = PetFrameReader(globalStatePath: config.globalStatePath)
         self.ringView = LimitRingView(frame: CGRect(origin: .zero, size: CGSize(width: config.fallbackSize, height: config.fallbackSize)))
         self.ringsVisible = UserDefaults.standard.object(forKey: ringsVisibleDefaultsKey) as? Bool ?? true
@@ -1635,10 +1748,38 @@ final class LimitRingsApp: NSObject {
             || newSettings.barThickness != settings.barThickness
             || newSettings.barPosition != settings.barPosition
             || newSettings.barFontSize != settings.barFontSize
+        let refreshIntervalChanged = newSettings.refreshInterval != settings.refreshInterval
+        let accountChanged = newSettings.activeAccountPath != settings.activeAccountPath
+        let statusBarContentChanged = newSettings.statusBarContent != settings.statusBarContent
         settings = newSettings
         applySettingsToViews()
+        if statusBarContentChanged {
+            updateStatusBarButton()
+        }
+        if accountChanged {
+            let homePath: URL
+            if let path = settings.activeAccountPath {
+                homePath = URL(fileURLWithPath: path)
+            } else {
+                homePath = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex")
+            }
+            config = LimitRingsConfig(
+                codexHome: homePath,
+                globalStatePath: homePath.appendingPathComponent(".codex-global-state.json"),
+                authPath: homePath.appendingPathComponent("auth.json"),
+                previewPath: nil
+            )
+            stateReader = LimitStateReader(authPath: config.authPath)
+            frameReader = PetFrameReader(globalStatePath: config.globalStatePath)
+            lastPetFrameTopLeft = nil
+            currentPetFrameAppKit = nil
+            updateState()
+        }
         if speedChanged {
             restartFrameTimer()
+        }
+        if refreshIntervalChanged {
+            restartStateTimer()
         }
         if displayModeChanged || geometryChanged {
             lastPetFrameTopLeft = nil
@@ -1654,6 +1795,7 @@ final class LimitRingsApp: NSObject {
         updateFrame()
         updateRingVisibility()
         rebuildMenuLocalization()
+        settings.save()
     }
 
     private func restartFrameTimer() {
@@ -1663,19 +1805,26 @@ final class LimitRingsApp: NSObject {
         }
     }
 
+    private func restartStateTimer() {
+        stateTimer?.invalidate()
+        stateTimer = nil
+        guard let interval = settings.refreshInterval.interval else { return }
+        stateTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            self?.updateState()
+        }
+    }
+
     func run() {
         installStatusMenu()
         updateState()
         updateFrame()
         updateRingVisibility()
 
-        stateTimer = Timer.scheduledTimer(withTimeInterval: limitStatePollInterval, repeats: true) { [weak self] _ in
-            self?.updateState()
-        }
+        restartStateTimer()
         frameTimer = Timer.scheduledTimer(withTimeInterval: settings.trackingSpeed.interval, repeats: true) { [weak self] _ in
             self?.updateFrame()
         }
-        hoverTimer = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { [weak self] _ in
+        hoverTimer = Timer.scheduledTimer(withTimeInterval: 0.20, repeats: true) { [weak self] _ in
             self?.updateTooltip(at: NSEvent.mouseLocation)
         }
         installDragFollow()
@@ -1699,6 +1848,7 @@ final class LimitRingsApp: NSObject {
                 self.barView.state = filtered
                 self.minimalView.state = filtered
                 self.updateSummaryMenuItem()
+                self.updateStatusBarButton()
                 self.stateReadInFlight = false
             }
         }
@@ -1838,6 +1988,48 @@ final class LimitRingsApp: NSObject {
         refreshItem?.target = self
         if let refreshItem { menu.addItem(refreshItem) }
 
+        menu.addItem(.separator())
+
+        // Account submenu
+        let accountItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        accountItem.submenu = NSMenu()
+        menu.addItem(accountItem)
+        accountMenuItem = accountItem
+
+        // Display mode submenu
+        let displayModeItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        displayModeItem.submenu = NSMenu()
+        menu.addItem(displayModeItem)
+        displayModeMenuItem = displayModeItem
+
+        // Data source submenu
+        let dataSourceItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        dataSourceItem.submenu = NSMenu()
+        menu.addItem(dataSourceItem)
+        dataSourceMenuItem = dataSourceItem
+
+        // Status bar content submenu
+        let statusBarItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        statusBarItem.submenu = NSMenu()
+        menu.addItem(statusBarItem)
+        statusBarContentMenuItem = statusBarItem
+
+        menu.addItem(.separator())
+
+        // Switch default account submenu
+        let defaultAccountItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        defaultAccountItem.submenu = NSMenu()
+        menu.addItem(defaultAccountItem)
+        defaultAccountMenuItem = defaultAccountItem
+
+        // Quit Codex app button
+        let quitCodexMenuItem = NSMenuItem(title: "", action: #selector(quitCodexApp(_:)), keyEquivalent: "")
+        quitCodexMenuItem.target = self
+        menu.addItem(quitCodexMenuItem)
+        quitCodexItem = quitCodexMenuItem
+
+        menu.addItem(.separator())
+
         settingsItem = NSMenuItem(title: "", action: #selector(openSettings(_:)), keyEquivalent: ",")
         settingsItem?.target = self
         if let settingsItem { menu.addItem(settingsItem) }
@@ -1852,6 +2044,146 @@ final class LimitRingsApp: NSObject {
         rebuildMenuLocalization()
         updateSummaryMenuItem()
         updateShowRingsMenuItem()
+        rebuildAccountMenu()
+        rebuildDisplayModeMenu()
+        rebuildDataSourceMenu()
+        rebuildStatusBarContentMenu()
+        rebuildDefaultAccountMenu()
+    }
+
+    private func rebuildAccountMenu() {
+        guard let accountMenuItem, let submenu = accountMenuItem.submenu else { return }
+        submenu.removeAllItems()
+        scannedAccountsForMenu = CodexAccountScanner.scan()
+
+        if scannedAccountsForMenu.count <= 1 {
+            accountMenuItem.isHidden = true
+            return
+        }
+        accountMenuItem.isHidden = false
+
+        for account in scannedAccountsForMenu {
+            let item = NSMenuItem(title: account.email, action: #selector(selectAccount(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = account.homePath.path
+            if account.homePath.path == (settings.activeAccountPath ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex").path) {
+                item.state = .on
+            }
+            submenu.addItem(item)
+        }
+    }
+
+    private func rebuildDisplayModeMenu() {
+        guard let displayModeMenuItem, let submenu = displayModeMenuItem.submenu else { return }
+        submenu.removeAllItems()
+        let lang = settings.language
+        for mode in DisplayMode.allCases {
+            let item = NSMenuItem(title: L10n.displayModeName(mode, lang: lang), action: #selector(selectDisplayMode(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = mode.rawValue
+            item.state = settings.displayMode == mode ? .on : .off
+            submenu.addItem(item)
+        }
+    }
+
+    private func rebuildDataSourceMenu() {
+        guard let dataSourceMenuItem, let submenu = dataSourceMenuItem.submenu else { return }
+        submenu.removeAllItems()
+        let lang = settings.language
+        for source in DataSource.allCases {
+            let item = NSMenuItem(title: L10n.dataSourceName(source, lang: lang), action: #selector(selectDataSource(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = source.rawValue
+            item.state = settings.dataSource == source ? .on : .off
+            submenu.addItem(item)
+        }
+    }
+
+    @objc private func selectAccount(_ sender: NSMenuItem) {
+        guard let path = sender.representedObject as? String else { return }
+        var newSettings = settings
+        newSettings.activeAccountPath = path
+        applySettings(newSettings)
+        rebuildAccountMenu()
+    }
+
+    @objc private func selectDisplayMode(_ sender: NSMenuItem) {
+        guard let rawValue = sender.representedObject as? String,
+              let mode = DisplayMode(rawValue: rawValue) else { return }
+        var newSettings = settings
+        newSettings.displayMode = mode
+        applySettings(newSettings)
+        rebuildDisplayModeMenu()
+    }
+
+    @objc private func selectDataSource(_ sender: NSMenuItem) {
+        guard let rawValue = sender.representedObject as? String,
+              let source = DataSource(rawValue: rawValue) else { return }
+        var newSettings = settings
+        newSettings.dataSource = source
+        applySettings(newSettings)
+        rebuildDataSourceMenu()
+    }
+
+    private func rebuildStatusBarContentMenu() {
+        guard let statusBarContentMenuItem, let submenu = statusBarContentMenuItem.submenu else { return }
+        submenu.removeAllItems()
+        let lang = settings.language
+        for content in StatusBarContent.allCases {
+            let item = NSMenuItem(title: L10n.statusBarContentName(content, lang: lang), action: #selector(selectStatusBarContent(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = content.rawValue
+            item.state = settings.statusBarContent == content ? .on : .off
+            submenu.addItem(item)
+        }
+    }
+
+    private func rebuildDefaultAccountMenu() {
+        guard let defaultAccountMenuItem, let submenu = defaultAccountMenuItem.submenu else { return }
+        submenu.removeAllItems()
+        let accounts = CodexAccountScanner.scan()
+
+        if accounts.count <= 1 {
+            defaultAccountMenuItem.isHidden = true
+            return
+        }
+        defaultAccountMenuItem.isHidden = false
+
+        let defaultPath = settings.defaultAccountPath ?? settings.activeAccountPath ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex").path
+        for account in accounts {
+            let item = NSMenuItem(title: account.email, action: #selector(selectDefaultAccount(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = account.homePath.path
+            if account.homePath.path == defaultPath {
+                item.state = .on
+            }
+            submenu.addItem(item)
+        }
+    }
+
+    @objc private func selectStatusBarContent(_ sender: NSMenuItem) {
+        guard let rawValue = sender.representedObject as? String,
+              let content = StatusBarContent(rawValue: rawValue) else { return }
+        var newSettings = settings
+        newSettings.statusBarContent = content
+        applySettings(newSettings)
+        rebuildStatusBarContentMenu()
+    }
+
+    @objc private func selectDefaultAccount(_ sender: NSMenuItem) {
+        guard let path = sender.representedObject as? String else { return }
+        var newSettings = settings
+        newSettings.defaultAccountPath = path
+        applySettings(newSettings)
+        rebuildDefaultAccountMenu()
+    }
+
+    @objc private func quitCodexApp(_ sender: NSMenuItem) {
+        let task = Process()
+        task.launchPath = "/usr/bin/pkill"
+        task.arguments = ["-f", "Codex"]
+        try? task.run()
+        task.waitUntilExit()
     }
 
     private func makeStatusBarIcon() -> NSImage {
@@ -1889,6 +2221,41 @@ final class LimitRingsApp: NSObject {
         return image
     }
 
+    private func makeMiniStatusBarIcon() -> NSImage {
+        let size = NSSize(width: 12, height: 12)
+        let image = NSImage(size: size)
+        image.lockFocus()
+
+        NSColor.black.setStroke()
+        let outer = NSBezierPath()
+        outer.appendArc(
+            withCenter: NSPoint(x: 6, y: 6),
+            radius: 4.5,
+            startAngle: 22,
+            endAngle: 338,
+            clockwise: false
+        )
+        outer.lineWidth = 1.5
+        outer.lineCapStyle = .round
+        outer.stroke()
+
+        let inner = NSBezierPath()
+        inner.appendArc(
+            withCenter: NSPoint(x: 6, y: 6),
+            radius: 2.4,
+            startAngle: 210,
+            endAngle: 82,
+            clockwise: false
+        )
+        inner.lineWidth = 1.2
+        inner.lineCapStyle = .round
+        inner.stroke()
+
+        image.unlockFocus()
+        image.isTemplate = true
+        return image
+    }
+
     private func updateSummaryMenuItem() {
         guard let summaryItem else { return }
         let lang = settings.language
@@ -1907,17 +2274,50 @@ final class LimitRingsApp: NSObject {
             var timePieces: [String] = []
             if let p = ringView.state.primary, let reset = p.resetAt {
                 let date = Date(timeIntervalSince1970: reset)
-                let fmt = DateFormatter()
-                fmt.dateFormat = "HH:mm"
-                timePieces.append("\(L10n.text("短窗口", "Short", lang: lang)) \(fmt.string(from: date))")
+                summaryDateFormatter.dateFormat = "HH:mm"
+                timePieces.append("\(L10n.text("短窗口", "Short", lang: lang)) \(summaryDateFormatter.string(from: date))")
             }
             if let s = ringView.state.secondary, let reset = s.resetAt {
                 let date = Date(timeIntervalSince1970: reset)
-                let fmt = DateFormatter()
-                fmt.dateFormat = "MM-dd HH:mm"
-                timePieces.append("\(L10n.text("周限额", "Weekly", lang: lang)) \(fmt.string(from: date))")
+                summaryDateFormatter.dateFormat = "MM-dd HH:mm"
+                timePieces.append("\(L10n.text("周限额", "Weekly", lang: lang)) \(summaryDateFormatter.string(from: date))")
             }
             refreshTimeItem?.title = timePieces.joined(separator: "  ")
+        }
+    }
+
+    private func updateStatusBarButton() {
+        guard let button = statusItem?.button else { return }
+        let state = ringView.state
+        let lang = settings.language
+
+        switch settings.statusBarContent {
+        case .icon:
+            statusItem?.length = NSStatusItem.squareLength
+            button.image = makeStatusBarIcon()
+            button.imagePosition = .imageOnly
+            button.title = ""
+        case .primary:
+            statusItem?.length = NSStatusItem.variableLength
+            button.image = makeMiniStatusBarIcon()
+            button.imagePosition = .imageLeft
+            let prefix = lang == .zh ? "短" : "S"
+            button.title = state.primary.map { "\(prefix)\(formatPercent($0.remainingPercent))" } ?? "--"
+        case .secondary:
+            statusItem?.length = NSStatusItem.variableLength
+            button.image = makeMiniStatusBarIcon()
+            button.imagePosition = .imageLeft
+            let prefix = lang == .zh ? "周" : "W"
+            button.title = state.secondary.map { "\(prefix)\(formatPercent($0.remainingPercent))" } ?? "--"
+        case .both:
+            statusItem?.length = NSStatusItem.variableLength
+            button.image = makeMiniStatusBarIcon()
+            button.imagePosition = .imageLeft
+            let pPrefix = lang == .zh ? "短" : "S"
+            let sPrefix = lang == .zh ? "周" : "W"
+            let p = state.primary.map { "\(pPrefix)\(formatPercent($0.remainingPercent))" } ?? "--"
+            let s = state.secondary.map { "\(sPrefix)\(formatPercent($0.remainingPercent))" } ?? "--"
+            button.title = "\(p) \(s)"
         }
     }
 
@@ -1927,7 +2327,18 @@ final class LimitRingsApp: NSObject {
         refreshItem?.title = L10n.text("立即刷新", "Refresh Now", lang: lang)
         settingsItem?.title = L10n.text("设置…", "Settings…", lang: lang)
         quitItem?.title = L10n.text("退出 Codex Pet Limit Rings", "Quit Codex Pet Limit Rings", lang: lang)
+        accountMenuItem?.title = L10n.text("账号", "Account", lang: lang)
+        defaultAccountMenuItem?.title = L10n.text("切换默认账号", "Default Account", lang: lang)
+        displayModeMenuItem?.title = L10n.text("显示模式", "Display", lang: lang)
+        dataSourceMenuItem?.title = L10n.text("数据源", "Data Source", lang: lang)
+        statusBarContentMenuItem?.title = L10n.text("状态栏显示", "Status Bar", lang: lang)
+        quitCodexItem?.title = L10n.text("退出 Codex 应用", "Quit Codex App", lang: lang)
         updateSummaryMenuItem()
+        rebuildAccountMenu()
+        rebuildDisplayModeMenu()
+        rebuildDataSourceMenu()
+        rebuildStatusBarContentMenu()
+        rebuildDefaultAccountMenu()
     }
 
     @objc private func openSettings(_ sender: NSMenuItem) {
@@ -1939,6 +2350,9 @@ final class LimitRingsApp: NSObject {
                 let fmt = DateFormatter()
                 fmt.dateFormat = "HH:mm:ss"
                 return fmt.string(from: t)
+            }, onManualRefresh: { [weak self] in
+                self?.updateState()
+                self?.updateFrame()
             })
         }
         settingsController?.show()
@@ -2008,11 +2422,6 @@ final class LimitRingsApp: NSObject {
         mouseUpMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseUp]) { [weak self] _ in
             DispatchQueue.main.async {
                 self?.endDragFollow()
-            }
-        }
-        mouseMoveMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved]) { [weak self] _ in
-            DispatchQueue.main.async {
-                self?.updateTooltip(at: NSEvent.mouseLocation)
             }
         }
     }
@@ -2176,7 +2585,7 @@ final class LimitRingsApp: NSObject {
 }
 
 func renderPreview(config: LimitRingsConfig) -> Bool {
-    let state = LimitStateReader(logsPath: config.logsPath, authPath: config.authPath).readLatest()
+    let state = LimitStateReader(authPath: config.authPath).readLatest()
     let size = CGSize(width: config.fallbackSize, height: config.fallbackSize)
     let image = NSImage(size: size)
     image.lockFocus()
@@ -2208,7 +2617,6 @@ func parseConfig() -> LimitRingsConfig? {
     var config = LimitRingsConfig(
         codexHome: codexHome,
         globalStatePath: codexHome.appendingPathComponent(".codex-global-state.json"),
-        logsPath: defaultLogsPath(codexHome: codexHome),
         authPath: codexHome.appendingPathComponent("auth.json"),
         previewPath: nil
     )
@@ -2219,7 +2627,7 @@ func parseConfig() -> LimitRingsConfig? {
         switch arg {
         case "--help", "-h":
             print("""
-            Usage: codex-pet-limit-rings [--preview PATH] [--codex-home PATH] [--logs PATH] [--auth PATH] [--state PATH]
+            Usage: codex-pet-limit-rings [--preview PATH] [--codex-home PATH] [--auth PATH] [--state PATH]
 
             Draws a transparent Codex rate-limit rings around the current pet.
             """)
@@ -2234,12 +2642,7 @@ func parseConfig() -> LimitRingsConfig? {
             let url = URL(fileURLWithPath: value)
             config.codexHome = url
             config.globalStatePath = url.appendingPathComponent(".codex-global-state.json")
-            config.logsPath = defaultLogsPath(codexHome: url)
             config.authPath = url.appendingPathComponent("auth.json")
-        case "--logs":
-            guard let value = args.first else { return nil }
-            args.removeFirst()
-            config.logsPath = URL(fileURLWithPath: value)
         case "--auth":
             guard let value = args.first else { return nil }
             args.removeFirst()
@@ -2259,14 +2662,6 @@ func parseConfig() -> LimitRingsConfig? {
     }
 
     return config
-}
-
-func defaultLogsPath(codexHome: URL) -> URL {
-    let logs2 = codexHome.appendingPathComponent("logs_2.sqlite")
-    if FileManager.default.fileExists(atPath: logs2.path) {
-        return logs2
-    }
-    return codexHome.appendingPathComponent("logs_1.sqlite")
 }
 
 guard let config = parseConfig() else {

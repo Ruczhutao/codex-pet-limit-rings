@@ -8,7 +8,7 @@ BIN="$APP/Contents/MacOS/CodexPetLimitRings"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$ROOT/tools/CodexPetLimitRings-Info.plist" "$APP/Contents/Info.plist"
-swiftc "$ROOT/tools/codex-pet-limit-rings.swift" -o "$BIN" -framework AppKit -lsqlite3
+swiftc "$ROOT/tools/codex-pet-limit-rings.swift" -o "$BIN" -framework AppKit
 
 ICON="$ROOT/resources/icon.png"
 if [ -f "$ICON" ]; then
