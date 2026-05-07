@@ -3,9 +3,18 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP="$ROOT/tmp/CodexPetLimitRings.app"
-DMG="$ROOT/CodexPetLimitRings.dmg"
 VOLNAME="CodexPetLimitRings"
 TMPDIR="$ROOT/tmp/dmg-staging"
+
+# Read version from Info.plist
+PLIST="$APP/Contents/Info.plist"
+if [ -f "$PLIST" ]; then
+    VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$PLIST" 2>/dev/null || echo "0.0.0")
+else
+    VERSION="0.0.0"
+fi
+
+DMG="$ROOT/CodexPetLimitRings-${VERSION}.dmg"
 
 # Build app first if not exists
 if [ ! -d "$APP" ]; then

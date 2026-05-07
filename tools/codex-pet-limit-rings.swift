@@ -2172,6 +2172,21 @@ final class LimitRingsApp: NSObject {
 
     @objc private func selectDefaultAccount(_ sender: NSMenuItem) {
         guard let path = sender.representedObject as? String else { return }
+        let sourceAuth = URL(fileURLWithPath: path).appendingPathComponent("auth.json")
+        let targetAuth = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/auth.json")
+        
+        // Copy auth.json to ~/.codex so Codex App uses the selected account
+        if FileManager.default.fileExists(atPath: sourceAuth.path) {
+            do {
+                if FileManager.default.fileExists(atPath: targetAuth.path) {
+                    try FileManager.default.removeItem(at: targetAuth)
+                }
+                try FileManager.default.copyItem(at: sourceAuth, to: targetAuth)
+            } catch {
+                print("Failed to copy auth.json: \(error)")
+            }
+        }
+        
         var newSettings = settings
         newSettings.defaultAccountPath = path
         applySettings(newSettings)
@@ -2613,7 +2628,14 @@ func renderPreview(config: LimitRingsConfig) -> Bool {
 
 func parseConfig() -> LimitRingsConfig? {
     let home = FileManager.default.homeDirectoryForCurrentUser
-    let codexHome = URL(fileURLWithPath: ProcessInfo.processInfo.environment["CODEX_HOME"] ?? home.appendingPathComponent(".codex").path)
+    let settings = LimitRingsSettings.load()
+    let defaultHome: String
+    if let defaultAccountPath = settings.defaultAccountPath {
+        defaultHome = defaultAccountPath
+    } else {
+        defaultHome = home.appendingPathComponent(".codex").path
+    }
+    let codexHome = URL(fileURLWithPath: ProcessInfo.processInfo.environment["CODEX_HOME"] ?? defaultHome)
     var config = LimitRingsConfig(
         codexHome: codexHome,
         globalStatePath: codexHome.appendingPathComponent(".codex-global-state.json"),
